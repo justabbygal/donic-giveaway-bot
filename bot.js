@@ -1262,18 +1262,17 @@ async function handleGiveawayRunback(interaction) {
   };
 
   // Show Step 1 confirmation
-  const summaryFields = [
-    `**Type:** ${step1Data.type}`,
-    `**Duration:** ${step1Data.duration} minute${step1Data.duration > 1 ? 's' : ''}`,
-    `**Winners:** ${step1Data.numWinners}`,
-    `**Currency:** ${step1Data.currency}`,
-    `**Auto-check:** ${step1Data.autoCheck ? '✅' : '❌'}`,
-  ];
+  const summaryLines = [];
+  summaryLines.push(`**Type:** ${step1Data.type}`);
+  summaryLines.push(`**Duration:** ${step1Data.duration} minute${step1Data.duration > 1 ? 's' : ''}`);
+  summaryLines.push(`**Winners:** ${step1Data.numWinners}`);
+  summaryLines.push(`**Currency:** ${step1Data.currency}`);
+  summaryLines.push(`**Auto-check:** ${step1Data.autoCheck ? '✅' : '❌'}`);
 
-  if (step1Data.minXp > 0) summaryFields.push(`**Min XP:** ${step1Data.minXp}k`);
-  if (step1Data.amount) summaryFields.push(`**Amount:** ${formatAmount(step1Data.amount)}`);
-  if (step1Data.withMember) summaryFields.push(`**Featured Member:** ${step1Data.withMember}`);
-  if (step1Data.otherReq) summaryFields.push(`**Additional Requirements:** Yes`);
+  if (step1Data.minXp > 0) summaryLines.push(`**Min XP:** ${step1Data.minXp}k`);
+  if (step1Data.amount) summaryLines.push(`**Amount:** ${formatAmount(step1Data.amount)}`);
+  if (step1Data.withMember) summaryLines.push(`**Featured Member:** ${step1Data.withMember}`);
+  if (step1Data.otherReq) summaryLines.push(`**Additional Requirements:** Yes`);
 
   const runbackId = Date.now();
   const confirmButton = new ButtonBuilder()
@@ -1287,10 +1286,7 @@ async function handleGiveawayRunback(interaction) {
     .setStyle(ButtonStyle.Danger);
 
   const embed = getBrandEmbed('Runback Confirmation')
-    .setDescription('Using the exact same settings as the last giveaway:')
-    .addFields(
-      summaryFields.map(field => ({ name: field.split(': ')[0].replace(/\*\*/g, ''), value: field.split(': ')[1], inline: true }))
-    );
+    .setDescription('Using the exact same settings as the last giveaway:\n\n' + summaryLines.join('\n'));
 
   const customId = `runback_${runbackId}`;
   templateCreationData.set(customId, step1Data);
