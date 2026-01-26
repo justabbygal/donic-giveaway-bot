@@ -3294,5 +3294,5 @@ client.once('ready', async () => {
 // ============================================================================
 // LOGIN
 // ============================================================================
-
+console.log('Token value:', process.env.DISCORD_TOKEN);
 client.login(process.env.DISCORD_TOKEN);
