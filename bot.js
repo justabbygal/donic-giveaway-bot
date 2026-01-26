@@ -253,6 +253,8 @@ if (!hasGwModRole && !isAdmin) {
       await handleGiveawayCancel(interaction);
     } else if (subcommand === 'reroll') {
       await handleGiveawayReroll(interaction);
+    } else if (subcommand === 'runback') {
+      await handleGiveawayRunback(interaction);
     }
   }
 
@@ -1231,6 +1233,218 @@ async function handleGiveawayReroll(interaction) {
   });
 }
 
+async function handleGiveawayRunback(interaction) {
+  await interaction.deferReply({ flags: 64 });
+
+  // Get the most recent giveaway for this guild
+  const lastGiveaway = await dbGet(
+    'SELECT * FROM active_giveaway WHERE guild_id = $1 ORDER BY started_at DESC LIMIT 1',
+    [interaction.guildId]
+  );
+
+  if (!lastGiveaway) {
+    return await interaction.editReply({
+      content: '❌ No previous giveaways found in this server.',
+    });
+  }
+
+  // Store the values for Step 1 display
+  const step1Data = {
+    type: lastGiveaway.giveaway_type,
+    duration: lastGiveaway.duration_minutes,
+    currency: lastGiveaway.currency,
+    numWinners: lastGiveaway.num_winners,
+    autoCheck: lastGiveaway.auto_check === 1 ? true : false,
+    minXp: lastGiveaway.min_xp,
+    amount: lastGiveaway.amount,
+    withMember: lastGiveaway.with_member,
+    otherReq: lastGiveaway.additional_requirements,
+  };
+
+  // Show Step 1 confirmation
+  const summaryFields = [
+    `**Type:** ${step1Data.type}`,
+    `**Duration:** ${step1Data.duration} minute${step1Data.duration > 1 ? 's' : ''}`,
+    `**Winners:** ${step1Data.numWinners}`,
+    `**Currency:** ${step1Data.currency}`,
+    `**Auto-check:** ${step1Data.autoCheck ? '✅' : '❌'}`,
+  ];
+
+  if (step1Data.minXp > 0) summaryFields.push(`**Min XP:** ${step1Data.minXp}k`);
+  if (step1Data.amount) summaryFields.push(`**Amount:** ${formatAmount(step1Data.amount)}`);
+  if (step1Data.withMember) summaryFields.push(`**Featured Member:** ${step1Data.withMember}`);
+  if (step1Data.otherReq) summaryFields.push(`**Additional Requirements:** Yes`);
+
+  const runbackId = Date.now();
+  const confirmButton = new ButtonBuilder()
+    .setCustomId(`gw_runback_confirm_${runbackId}`)
+    .setLabel('✅ Run this giveaway')
+    .setStyle(ButtonStyle.Success);
+
+  const cancelButton = new ButtonBuilder()
+    .setCustomId(`gw_runback_cancel_${runbackId}`)
+    .setLabel('❌ Cancel')
+    .setStyle(ButtonStyle.Danger);
+
+  const embed = getBrandEmbed('Runback Confirmation')
+    .setDescription('Using the exact same settings as the last giveaway:')
+    .addFields(
+      summaryFields.map(field => ({ name: field.split(': ')[0].replace(/\*\*/g, ''), value: field.split(': ')[1], inline: true }))
+    );
+
+  const customId = `runback_${runbackId}`;
+  templateCreationData.set(customId, step1Data);
+
+  await interaction.editReply({
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder().addComponents(confirmButton, cancelButton),
+    ],
+  });
+
+  // Handle button interactions
+  const filter = i => i.user.id === interaction.user.id && i.customId.includes(`gw_runback`) && i.customId.includes(String(runbackId));
+  const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000 });
+
+  collector.on('collect', async (i) => {
+    if (i.customId === `gw_runback_confirm_${runbackId}`) {
+      await i.deferReply({ flags: 64 });
+
+      // Start the new giveaway with the same values
+      const endTime = Date.now() + step1Data.duration * 60000;
+      const newGiveaway = {
+        guild_id: interaction.guildId,
+        channel_id: interaction.channelId,
+        giveaway_type: step1Data.type,
+        min_xp: step1Data.minXp,
+        amount: step1Data.amount,
+        currency: step1Data.currency,
+        with_member: step1Data.withMember,
+        additional_requirements: step1Data.otherReq,
+        num_winners: step1Data.numWinners,
+        auto_check: step1Data.autoCheck ? 1 : 0,
+        hosted_by: interaction.user.id,
+        started_at: Date.now(),
+        ends_at: endTime,
+        duration_minutes: step1Data.duration,
+      };
+
+      // Create the giveaway message
+      let title = `GIVEAWAY:`;
+      if (step1Data.type !== 'Custom') {
+        if (step1Data.amount !== null && step1Data.amount !== undefined) {
+          title += ` ${formatAmount(step1Data.amount)} ${step1Data.currency}`;
+        }
+        title += ` ${step1Data.type}`;
+        if (step1Data.withMember) {
+          title += ` with ${step1Data.withMember}!`;
+        } else {
+          title += '!';
+        }
+      } else {
+        if (step1Data.withMember) {
+          title += ` with ${step1Data.withMember}!`;
+        }
+      }
+
+      const giveawayEmbed = getBrandEmbed(title);
+
+      // Build requirements text
+      let reqText = '';
+      if (step1Data.minXp > 0) {
+        reqText += `• ${step1Data.minXp}k XP`;
+      }
+      if (step1Data.otherReq) {
+        const reqLines = step1Data.otherReq.split('\n');
+        if (reqLines.length > 0) {
+          if (reqText) {
+            reqText += '\n';
+          }
+          reqText += reqLines.map(line => {
+            if (!line.trim()) {
+              return '';
+            }
+            if (line.trim().startsWith('|')) {
+              return line.trim().substring(1);
+            }
+            return `• ${line}`;
+          }).join('\n');
+        }
+      }
+
+      if (!reqText) {
+        reqText = 'None';
+      }
+
+      const discordTimestamp = formatDiscordTimestamp(endTime);
+
+      const descParts = [
+        '═════════════════════════\n⚠️ **MUST BE UNDER CODE *DONIC*** ⚠️\n═════════════════════════',
+        `Hosted by: <@${interaction.user.id}>\n`,
+        `Winners: ${step1Data.numWinners}`,
+        `Entries: 0`
+      ];
+      
+      if (step1Data.autoCheck) {
+        descParts.push(`Ineligible: 0\n─────────────────────────`);
+      } else {
+        descParts.push(`─────────────────────────`);
+      }
+
+      giveawayEmbed.setDescription(descParts.join('\n'));
+      giveawayEmbed.addFields({ name: 'DETAILS:', value: reqText, inline: false });
+      giveawayEmbed.addFields({ name: '\u200b', value: '\u200b', inline: false });
+      giveawayEmbed.addFields({ name: '🕐 Ends in:', value: `${discordTimestamp}`, inline: false });
+
+      const enterButton = new ButtonBuilder()
+        .setCustomId('enter_giveaway')
+        .setLabel('Enter Giveaway')
+        .setStyle(ButtonStyle.Primary);
+
+      const giveawayMessage = await interaction.channel.send({
+        embeds: [giveawayEmbed],
+        components: [new ActionRowBuilder().addComponents(enterButton)],
+      });
+
+      // Store in database
+      await dbRun(
+        `INSERT INTO active_giveaway (guild_id, channel_id, message_id, giveaway_type, min_xp, amount, currency, with_member, additional_requirements, num_winners, auto_check, hosted_by, started_at, ends_at, duration_minutes, is_active, eligible_entrants, ineligible_entrants)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, '[]', '[]')`,
+        [
+          interaction.guildId,
+          interaction.channelId,
+          giveawayMessage.id,
+          newGiveaway.giveaway_type,
+          newGiveaway.min_xp,
+          newGiveaway.amount,
+          newGiveaway.currency,
+          newGiveaway.with_member,
+          newGiveaway.additional_requirements,
+          newGiveaway.num_winners,
+          newGiveaway.auto_check,
+          newGiveaway.hosted_by,
+          newGiveaway.started_at,
+          newGiveaway.ends_at,
+          newGiveaway.duration_minutes,
+        ]
+      );
+
+      // Start update loop and timer
+      startGiveawayUpdateLoop(interaction.guildId);
+      startAutoEndTimer(interaction.guildId, endTime);
+
+      await i.editReply({
+        content: `✅ Giveaway started! ${giveawayMessage.url}`,
+      });
+    } else if (i.customId === `gw_runback_cancel_${runbackId}`) {
+      await i.deferReply({ flags: 64 });
+      await i.editReply({
+        content: '❌ Cancelled.',
+      });
+    }
+  });
+}
+
 async function handleTemplateCreate(interaction) {
   const name = interaction.options.getString('name');
 
@@ -1366,7 +1580,7 @@ async function handleTemplateEdit(interaction) {
       Array.from({ length: 15 }, (_, idx) => ({
         label: `${idx + 1} minute${idx + 1 > 1 ? 's' : ''}`,
         value: String(idx + 1),
-        default: template.duration === idx + 1,
+        default: Number(template.duration) === idx + 1,
       }))
     );
 
@@ -3093,6 +3307,11 @@ client.once('ready', async () => {
           type: 1,
           name: 'reroll',
           description: 'Reroll winner(s) (excludes initial winners)',
+        },
+        {
+          type: 1,
+          name: 'runback',
+          description: 'Run another giveaway with exact same values as last one',
         },
         {
           type: 2,
