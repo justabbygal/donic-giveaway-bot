@@ -1012,11 +1012,11 @@ async function handleGiveawayEnd(interaction) {
       interaction.guildId,
     ]);
     
-    // Stop the update loop before editing
-    if (updateLoops.has(interaction.guildId)) {
-      clearInterval(updateLoops.get(interaction.guildId));
-      updateLoops.delete(interaction.guildId);
-    }
+// Stop the update loop before editing
+if (updateLoops.has(guildId)) {
+  clearInterval(updateLoops.get(guildId));
+  updateLoops.delete(guildId);
+}
     
     // Edit the original message for no eligible entrants
     try {
