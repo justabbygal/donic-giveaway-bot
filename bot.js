@@ -830,12 +830,15 @@ async function handleGiveawayQuickStart(interaction) {
       reqText += `• ${minXp}k XP`;
     }
     if (otherReq) {
-      const reqLines = otherReq.split('\n').filter(line => line.trim());
+      const reqLines = otherReq.split('\n');
       if (reqLines.length > 0) {
         if (reqText) {
           reqText += '\n';
         }
         reqText += reqLines.map(line => {
+          if (!line.trim()) {
+            return '';
+          }
           if (line.trim().startsWith('|')) {
             return line.trim().substring(1);
           }
@@ -2417,12 +2420,15 @@ async function handleModal(interaction) {
       reqText += `• ${minXp}k XP`;
     }
     if (otherReq) {
-      const reqLines = otherReq.split('\n').filter(line => line.trim());
+      const reqLines = otherReq.split('\n');
       if (reqLines.length > 0) {
         if (reqText) {
           reqText += '\n';
         }
         reqText += reqLines.map(line => {
+          if (!line.trim()) {
+            return '';
+          }
           if (line.trim().startsWith('|')) {
             return line.trim().substring(1);
           }
@@ -2913,12 +2919,15 @@ async function updateGiveawayMessage(guildId) {
       reqText += `• ${giveaway.min_xp}k XP`;
     }
     if (giveaway.additional_requirements) {
-      const reqLines = giveaway.additional_requirements.split('\n').filter(line => line.trim());
+      const reqLines = giveaway.additional_requirements.split('\n');
       if (reqLines.length > 0) {
         if (reqText) {
           reqText += '\n';
         }
         reqText += reqLines.map(line => {
+          if (!line.trim()) {
+            return '';
+          }
           if (line.trim().startsWith('|')) {
             return line.trim().substring(1);
           }
