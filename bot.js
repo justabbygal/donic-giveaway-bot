@@ -17,7 +17,7 @@ const axios = require('axios');
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
 }
-
+console.log('All env vars:', Object.keys(process.env).slice(0, 10));
 // ============================================================================
 // DATABASE SETUP
 // ============================================================================
