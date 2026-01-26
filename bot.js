@@ -835,7 +835,12 @@ async function handleGiveawayQuickStart(interaction) {
         if (reqText) {
           reqText += '\n';
         }
-        reqText += reqLines.map(line => `• ${line}`).join('\n');
+        reqText += reqLines.map(line => {
+          if (line.trim().startsWith('|')) {
+            return line.trim().substring(1);
+          }
+          return `• ${line}`;
+        }).join('\n');
       }
     }
 
@@ -2417,7 +2422,12 @@ async function handleModal(interaction) {
         if (reqText) {
           reqText += '\n';
         }
-        reqText += reqLines.map(line => `• ${line}`).join('\n');
+        reqText += reqLines.map(line => {
+          if (line.trim().startsWith('|')) {
+            return line.trim().substring(1);
+          }
+          return `• ${line}`;
+        }).join('\n');
       }
     }
     
@@ -2908,7 +2918,12 @@ async function updateGiveawayMessage(guildId) {
         if (reqText) {
           reqText += '\n';
         }
-        reqText += reqLines.map(line => `• ${line}`).join('\n');
+        reqText += reqLines.map(line => {
+          if (line.trim().startsWith('|')) {
+            return line.trim().substring(1);
+          }
+          return `• ${line}`;
+        }).join('\n');
       }
     }
 
