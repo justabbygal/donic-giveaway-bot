@@ -1064,7 +1064,7 @@ async function handleGiveawayEnd(interaction) {
     });
   }
 
-  const winnerIds = selectWinners(eligible, giveaway.num_winners);
+  const winnerIds = await selectWinners(eligible, giveaway.num_winners, interaction.guildId);
   
   // Stop the update loop before editing
   if (updateLoops.has(interaction.guildId)) {
@@ -1207,7 +1207,7 @@ async function handleGiveawayReroll(interaction) {
     });
   }
 
-  const winnerIds = selectWinners(availableForReroll, giveaway.num_winners);
+  const winnerIds = await selectWinners(availableForReroll, giveaway.num_winners, interaction.guildId);
   const channel = await client.channels.fetch(giveaway.channel_id);
 
   let announcement = '🎰 **Reroll Winners:**\n\n';
@@ -2725,10 +2725,11 @@ function startAutoEndTimer(guildId, endTime) {
 
     if (giveaway && giveaway.is_active) {
       // Stop the update loop before editing
-if (updateLoops.has(guildId)) {
-  clearInterval(updateLoops.get(guildId));
-  updateLoops.delete(guildId);
-}
+      if (updateLoops.has(guildId)) {
+        clearInterval(updateLoops.get(guildId));
+        updateLoops.delete(guildId);
+      }
+
       console.log(`⏰ Giveaway timer expired for guild ${guildId}`);
       const eligible = JSON.parse(giveaway.eligible_entrants || '[]');
       console.log(`📋 Eligible entrants: ${eligible.length}`);
@@ -2773,7 +2774,7 @@ if (updateLoops.has(guildId)) {
         }
       } else {
         console.log(`🎉 Selecting ${giveaway.num_winners} winner(s) from ${eligible.length} eligible`);
-        const winnerIds = selectWinners(eligible, giveaway.num_winners);
+        const winnerIds = await selectWinners(eligible, giveaway.num_winners, guildId);
         try {
           const channel = await client.channels.fetch(giveaway.channel_id);
           console.log(`✓ Fetched channel: ${channel.id}`);
@@ -2867,7 +2868,7 @@ async function updateGiveawayMessage(guildId) {
     [guildId]
   );
 
-  if (!giveaway || !giveaway.is_active) return;
+  if (!giveaway) return;
 
   const channel = await client.channels.fetch(giveaway.channel_id);
   const message = await channel.messages.fetch(giveaway.message_id);
@@ -2965,16 +2966,51 @@ embed.addFields(
   }
 }
 
-function selectWinners(entrants, count) {
+async function selectWinners(entrants, count, guildId) {
   if (entrants.length === 0) return [];
 
-  const winners = [];
-  const copy = [...entrants];
+  // Get last 5 completed giveaways for this server
+  const recentGiveaways = await dbAll(
+    'SELECT initial_winners FROM active_giveaway WHERE guild_id = $1 AND is_active = 0 ORDER BY ends_at DESC LIMIT 5',
+    [guildId]
+  );
 
-  for (let i = 0; i < Math.min(count, copy.length); i++) {
-    const randomIndex = Math.floor(Math.random() * copy.length);
-    winners.push(copy[randomIndex]);
-    copy.splice(randomIndex, 1);
+  // Extract all winners from last 5 giveaways
+  const recentWinners = new Set();
+  for (const giveaway of recentGiveaways) {
+    if (giveaway.initial_winners) {
+      try {
+        const winners = JSON.parse(giveaway.initial_winners);
+        winners.forEach(winnerId => recentWinners.add(winnerId));
+      } catch (err) {
+        console.error('Failed to parse winners:', err);
+      }
+    }
+  }
+
+  const winners = [];
+  const availableEntrants = [...entrants];
+
+  for (let i = 0; i < Math.min(count, availableEntrants.length); i++) {
+    // Create weighted list for this selection
+    const weighted = [];
+    for (const entrant of availableEntrants) {
+      if (recentWinners.has(entrant)) {
+        // Repeat winner - add 3 times (75% weight = 25% less chance)
+        weighted.push(entrant, entrant, entrant);
+      } else {
+        // New winner - add 4 times (100% weight)
+        weighted.push(entrant, entrant, entrant, entrant);
+      }
+    }
+
+    // Select winner from weighted list
+    const randomIndex = Math.floor(Math.random() * weighted.length);
+    const winner = weighted[randomIndex];
+    winners.push(winner);
+
+    // Remove from available for next selection
+    availableEntrants.splice(availableEntrants.indexOf(winner), 1);
   }
 
   return winners;
