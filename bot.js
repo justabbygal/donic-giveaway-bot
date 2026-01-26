@@ -1861,15 +1861,17 @@ async function handleButton(interaction) {
   }
 
   if (interaction.customId === 'enter_giveaway') {
+    // Defer immediately to prevent timeout
+    await interaction.deferReply({ flags: 64 });
+
     const giveaway = await dbGet(
       'SELECT * FROM active_giveaway WHERE guild_id = $1',
       [interaction.guildId]
     );
 
     if (!giveaway || !giveaway.is_active) {
-      return await interaction.reply({
+      return await interaction.editReply({
         content: '❌ No active giveaway.',
-        flags: 64,
       });
     }
 
@@ -1877,9 +1879,8 @@ async function handleButton(interaction) {
     const ineligible = JSON.parse(giveaway.ineligible_entrants || '[]');
 
     if (eligible.includes(interaction.user.id) || ineligible.includes(interaction.user.id)) {
-      return await interaction.reply({
+      return await interaction.editReply({
         content: '✅ You already entered.',
-        flags: 64,
       });
     }
 
@@ -1889,9 +1890,8 @@ async function handleButton(interaction) {
     );
 
     // if (!mapped) {
-    //   return await interaction.reply({
+    //   return await interaction.editReply({
     //     content: '🔗 Please type your Thrill username in the giveaway channel to complete entry.',
-    //     flags: 64,
     //   });
     // }
 
@@ -1909,9 +1909,8 @@ async function handleButton(interaction) {
         );
         await updateGiveawayMessage(interaction.guildId);
 
-        return await interaction.reply({
+        return await interaction.editReply({
           content: `🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code Donic + XP** if you win.`,
-          flags: 64,
         });
       }
 
@@ -1923,9 +1922,8 @@ async function handleButton(interaction) {
         );
         await updateGiveawayMessage(interaction.guildId);
 
-        return await interaction.reply({
+        return await interaction.editReply({
           content: `❌ ${result.reason}`,
-          flags: 64,
         });
       }
     }
@@ -1938,9 +1936,8 @@ async function handleButton(interaction) {
 
     await updateGiveawayMessage(interaction.guildId);
 
-    await interaction.reply({
+    await interaction.editReply({
       content: '🍀 Entered - Good luck!',
-      flags: 64,
     });
   }
 
