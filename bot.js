@@ -14,7 +14,9 @@ const dotenv = require('dotenv');
 const sqlite3 = require('sqlite3').verbose();
 const axios = require('axios');
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config();
+}
 
 // ============================================================================
 // DATABASE SETUP
