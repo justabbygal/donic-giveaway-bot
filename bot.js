@@ -315,12 +315,11 @@ function formatAmount(amount) {
   return `$${amount}`;
 }
 
-function formatTimeRemaining(endTime) {
-  const now = Date.now();
-  const remaining = Math.max(0, endTime - now);
-  const minutes = Math.floor(remaining / 60000);
-  const seconds = Math.floor((remaining % 60000) / 1000);
-  return `${minutes}m ${seconds}s`;
+// Format as Discord relative timestamp - Discord handles countdown automatically
+function formatDiscordTimestamp(endTime) {
+  // Convert ms to seconds for Discord timestamp format
+  // :R = relative time (e.g., "in 5 hours", "2 days ago")
+  return `<t:${Math.floor(endTime / 1000)}:R>`;
 }
 
 // ============================================================================
@@ -991,7 +990,6 @@ async function handleGiveawayQuickStart(interaction) {
     const embed = getBrandEmbed(title);
     
     const endTime = Date.now() + duration * 60000;
-    const localTime = new Date(endTime).toLocaleString();
 
     // Build requirements text
     let reqText = '';
@@ -1012,7 +1010,7 @@ async function handleGiveawayQuickStart(interaction) {
       reqText = 'None';
     }
 
-    const timeRemaining = formatTimeRemaining(endTime);
+    const discordTimestamp = formatDiscordTimestamp(endTime);
 
     // Build description with hosted by and winner/entry info
     const descParts = [
@@ -1040,7 +1038,7 @@ embed.addFields(
 );    
 
 embed.addFields(
-      { name: '🕐 Ends in:', value: `${timeRemaining}`, inline: false }
+      { name: '🕐 Ends in:', value: `${discordTimestamp}`, inline: false }
     );
 
     const enterButton = new ButtonBuilder()
@@ -2569,7 +2567,6 @@ async function handleModal(interaction) {
     const embed = getBrandEmbed(title);
     
     const endTime = Date.now() + duration * 60000;
-    const localTime = new Date(endTime).toLocaleString();
 
     let reqText = '';
     if (minXp > 0) {
@@ -2590,7 +2587,7 @@ async function handleModal(interaction) {
       reqText = 'None';
     }
 
-    const timeRemaining = formatTimeRemaining(endTime);
+    const discordTimestamp = formatDiscordTimestamp(endTime);
 
     // Build description with hosted by and winner/entry info
     const descParts = [
@@ -2617,7 +2614,7 @@ embed.addFields(
 );
 
     embed.addFields(
-      { name: '🕐 Ends in:', value: `${timeRemaining}`, inline: false }
+      { name: '🕐 Ends in:', value: `${discordTimestamp}`, inline: false }
     );
 
 
@@ -2900,13 +2897,11 @@ function startAutoEndTimer(guildId, endTime) {
           console.log(`✓ Fetched message: ${message.id}`);
           const embed = EmbedBuilder.from(message.embeds[0]);
           
-          // Update the "Ends in" field by mapping over existing fields
+          // Update the "Ends in" field to show it has ended
           const fields = embed.data.fields || [];
           const updatedFields = fields.map(f => {
             if (f.name === '🕐 Ends in:') {
-              const lines = f.value.split('\n');
-              const timestamp = lines.length > 1 ? lines.slice(1).join('\n') : '';
-              return { name: '🕐 Ends in:', value: `This giveaway has ended${timestamp ? '\n' + timestamp : ''}`, inline: f.inline };
+              return { name: '🕐 Ends in:', value: 'This giveaway has ended', inline: f.inline };
             }
             return f;
           });
@@ -2979,13 +2974,11 @@ function startAutoEndTimer(guildId, endTime) {
 
           const embed = EmbedBuilder.from(message.embeds[0]);
           
-          // Update the "Ends in" field by mapping over existing fields
+          // Update the "Ends in" field to show it has ended
           const fields = embed.data.fields || [];
           const updatedFields = fields.map(f => {
             if (f.name === '🕐 Ends in:') {
-              const lines = f.value.split('\n');
-              const timestamp = lines.length > 1 ? lines.slice(1).join('\n') : '';
-              return { name: '🕐 Ends in:', value: `This giveaway has ended${timestamp ? '\n' + timestamp : ''}`, inline: f.inline };
+              return { name: '🕐 Ends in:', value: 'This giveaway has ended', inline: f.inline };
             }
             return f;
           });
@@ -3055,7 +3048,6 @@ async function updateGiveawayMessage(guildId) {
   const embed = getBrandEmbed(title);
     
     const endTime = giveaway.ends_at;
-    const localTime = new Date(endTime).toLocaleString();
 
     let reqText = '';
     if (giveaway.min_xp > 0) {
@@ -3076,7 +3068,7 @@ async function updateGiveawayMessage(guildId) {
       reqText = 'None';
     }
 
-    const timeRemaining = formatTimeRemaining(endTime);
+    const discordTimestamp = formatDiscordTimestamp(endTime);
 
     // Build description with hosted by and winner/entry info
     const descParts = [
@@ -3104,7 +3096,7 @@ embed.addFields(
 );
 
 embed.addFields(
-      { name: '🕐 Ends in:', value: `${timeRemaining}`, inline: false }
+      { name: '🕐 Ends in:', value: `${discordTimestamp}`, inline: false }
     );
 
 
