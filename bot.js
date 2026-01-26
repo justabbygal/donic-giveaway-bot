@@ -2675,6 +2675,7 @@ embed.addFields(
 // MESSAGE HANDLER (for username entry)
 // ============================================================================
 
+/*
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
@@ -2766,6 +2767,7 @@ client.on('messageCreate', async (message) => {
     });
   }
 });
+*/
 
 // ============================================================================
 // ELIGIBILITY CHECK
