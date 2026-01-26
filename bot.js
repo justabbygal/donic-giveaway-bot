@@ -326,7 +326,7 @@ function formatDiscordTimestamp(endTime) {
 // DISCORD BOT
 // ============================================================================
 
-// Map to track original Step 1 interactions for cleanup
+// Map to track original Step 1 interactions for cleanup.
 const step1Interactions = new Map();
 
 // Map to store Step 1 message IDs so Load Template can find them
