@@ -2862,7 +2862,7 @@ async function updateGiveawayMessage(guildId) {
     [guildId]
   );
 
-  if (!giveaway) return;
+  if (!giveaway || !giveaway.is_active) return;
 
   const channel = await client.channels.fetch(giveaway.channel_id);
   const message = await channel.messages.fetch(giveaway.message_id);
