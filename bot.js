@@ -1040,7 +1040,7 @@ embed.addFields(
 );    
 
 embed.addFields(
-      { name: '🕐 Ends in:', value: `${timeRemaining}\n(${localTime})`, inline: false }
+      { name: '🕐 Ends in:', value: `${timeRemaining}`, inline: false }
     );
 
     const enterButton = new ButtonBuilder()
@@ -1206,7 +1206,7 @@ async function handleGiveawayEnd(interaction) {
       
       for (const f of fields) {
         if (f.name === '🕐 Ends in:') {
-          newFields.push({ name: '🕐 Ends in:', value: `This giveaway has ended\n(${formattedTime})`, inline: f.inline });
+          newFields.push({ name: '🕐 Ends in:', value: `This giveaway has ended`, inline: f.inline });
         } else {
           newFields.push(f);
         }
@@ -1297,7 +1297,7 @@ async function handleGiveawayEnd(interaction) {
     
     for (const f of fields) {
       if (f.name === '🕐 Ends in:') {
-        newFields.push({ name: '🕐 Ends in:', value: `This giveaway has ended\n(${formattedTime})`, inline: f.inline });
+        newFields.push({ name: '🕐 Ends in:', value: `This giveaway has ended`, inline: f.inline });
       } else {
         newFields.push(f);
       }
@@ -1835,14 +1835,14 @@ async function handleButton(interaction) {
       [interaction.user.id]
     );
 
-    if (!mapped) {
-      return await interaction.reply({
-        content: '🔗 Please type your Thrill username in the giveaway channel to complete entry.',
-        flags: 64,
-      });
-    }
+    // if (!mapped) {
+    //   return await interaction.reply({
+    //     content: '🔗 Please type your Thrill username in the giveaway channel to complete entry.',
+    //     flags: 64,
+    //   });
+    // }
 
-    if (giveaway.auto_check) {
+    if (giveaway.auto_check && mapped) {
       const result = await checkEligibility(
         mapped.thrill_username,
         giveaway.min_xp
@@ -2617,7 +2617,7 @@ embed.addFields(
 );
 
     embed.addFields(
-      { name: '🕐 Ends in:', value: `${timeRemaining}\n(${localTime})`, inline: false }
+      { name: '🕐 Ends in:', value: `${timeRemaining}`, inline: false }
     );
 
 
@@ -3104,7 +3104,7 @@ embed.addFields(
 );
 
 embed.addFields(
-      { name: '🕐 Ends in:', value: `${timeRemaining}\n(${localTime})`, inline: false }
+      { name: '🕐 Ends in:', value: `${timeRemaining}`, inline: false }
     );
 
 
