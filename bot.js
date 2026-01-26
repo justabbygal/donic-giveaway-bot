@@ -3284,13 +3284,9 @@ client.once('ready', async () => {
     },
   ];
 
-  const guild = client.guilds.cache.get(process.env.DISCORD_GUILD_ID);
-  if (guild) {
-    // Clear global commands and set guild commands
-    await client.application?.commands.set([]);
-    await guild.commands.set(commands);
-    console.log(`✅ Slash commands registered for guild ${guild.name}`);
-  }
+  // Register commands globally
+await client.application?.commands.set(commands);
+console.log(`✅ Slash commands registered globally`);
 });
 
 // ============================================================================
