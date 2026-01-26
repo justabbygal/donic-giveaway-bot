@@ -11,7 +11,7 @@ const {
   TextInputStyle,
 } = require('discord.js');
 const dotenv = require('dotenv');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const axios = require('axios');
 
 if (process.env.NODE_ENV !== 'production') {
@@ -22,277 +22,109 @@ console.log('All env vars:', Object.keys(process.env).slice(0, 10));
 // DATABASE SETUP
 // ============================================================================
 
-const dbPath = process.env.DATABASE_PATH || './giveaway.db';
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Database error:', err);
-  } else {
-    console.log('✅ Connected to SQLite database');
-  }
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS user_map (
-      discord_user_id TEXT PRIMARY KEY,
-      thrill_username TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS eligibility_cache (
-      thrill_username TEXT PRIMARY KEY,
-      last_xp INTEGER,
-      last_under_donic INTEGER,
-      last_checked_at INTEGER NOT NULL
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS templates (
-      guild_id TEXT,
-      template_id TEXT,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      duration TEXT,
-      num_winners INTEGER,
-      auto_check INTEGER,
-      min_xp INTEGER,
-      amount REAL,
-      currency TEXT,
-      tiers TEXT,
-      with_member TEXT,
-      additional_requirements TEXT,
-      PRIMARY KEY (guild_id, template_id)
-    )
-  `);
-
-  db.run(`DROP TABLE IF EXISTS server_settings`);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS server_settings (
-      guild_id TEXT PRIMARY KEY,
-      default_type TEXT,
-      default_duration INTEGER,
-      default_currency TEXT,
-      default_winners INTEGER,
-      default_autocheck INTEGER
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS active_giveaway (
-      guild_id TEXT PRIMARY KEY,
-      channel_id TEXT NOT NULL,
-      message_id TEXT,
-      giveaway_type TEXT NOT NULL,
-      min_xp INTEGER NOT NULL,
-      additional_requirements TEXT,
-      amount REAL,
-      currency TEXT,
-      tiers TEXT,
-      auto_check INTEGER NOT NULL DEFAULT 1,
-      hosted_by TEXT NOT NULL,
-      with_member TEXT,
-      num_winners INTEGER NOT NULL DEFAULT 1,
-      eligible_entrants TEXT NOT NULL DEFAULT '[]',
-      ineligible_entrants TEXT NOT NULL DEFAULT '[]',
-      initial_winners TEXT NOT NULL DEFAULT '[]',
-      started_at INTEGER NOT NULL,
-      duration_minutes INTEGER,
-      ends_at INTEGER,
-      is_active INTEGER NOT NULL DEFAULT 1
-    )
-  `);
-
-  db.run(`
-    ALTER TABLE active_giveaway 
-    ADD COLUMN additional_requirements TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-      // Column already exists, no action needed
-    } else if (err) {
-      // Ignore other errors
-    }
-  });
-
-  db.run(`
-    ALTER TABLE active_giveaway 
-    ADD COLUMN hosted_by TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-      // Column already exists, no action needed
-    } else if (err) {
-      // Ignore other errors
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN with_member TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-      // Column already exists, no action needed
-    } else if (err) {
-      // Ignore other errors
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN num_winners INTEGER DEFAULT 1
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-      // Column already exists, no action needed
-    } else if (err) {
-      // Ignore other errors
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN eligible_entrants TEXT DEFAULT '[]'
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN ineligible_entrants TEXT DEFAULT '[]'
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN initial_winners TEXT DEFAULT '[]'
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN duration_minutes INTEGER
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  // Add missing columns to templates table
-  db.run(`
-    ALTER TABLE templates
-    ADD COLUMN duration TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  db.run(`
-    ALTER TABLE templates
-    ADD COLUMN num_winners INTEGER
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  db.run(`
-    ALTER TABLE templates
-    ADD COLUMN auto_check INTEGER
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  db.run(`
-    ALTER TABLE templates
-    ADD COLUMN with_member TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  db.run(`
-    ALTER TABLE templates
-    ADD COLUMN additional_requirements TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  console.log('✅ Database tables initialized');
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
 });
 
-// ============================================================================
-// THRILL API SERVICE
-// ============================================================================
+// Initialize database schema
+async function initializeDatabase() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_map (
+        discord_user_id TEXT PRIMARY KEY,
+        thrill_username TEXT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `);
 
-class ThrillService {
-  constructor() {
-    this.baseUrl = process.env.THRILL_API_BASE_URL;
-    this.apiKey = process.env.THRILL_API_KEY;
-  }
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eligibility_cache (
+        thrill_username TEXT PRIMARY KEY,
+        last_xp INTEGER,
+        last_under_donic INTEGER,
+        last_checked_at BIGINT NOT NULL
+      )
+    `);
 
-  async lookupUserByUsername(username) {
-    try {
-      const response = await axios.get(`${this.baseUrl}/users/${username}`, {
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        timeout: 5000,
-      });
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS templates (
+        guild_id TEXT,
+        template_id TEXT,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        duration TEXT,
+        num_winners INTEGER,
+        auto_check INTEGER,
+        min_xp INTEGER,
+        amount REAL,
+        currency TEXT,
+        tiers TEXT,
+        with_member TEXT,
+        additional_requirements TEXT,
+        PRIMARY KEY (guild_id, template_id)
+      )
+    `);
 
-      return {
-        xp: response.data.xp || 0,
-        underDonic: response.data.underDonic || false,
-      };
-    } catch (error) {
-      if (error.response?.status === 404) {
-        return { status: 'NOT_FOUND' };
-      }
-      console.error(`Thrill API error for ${username}:`, error.message);
-      return { status: 'API_DOWN' };
-    }
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS server_settings (
+        guild_id TEXT PRIMARY KEY,
+        default_type TEXT,
+        default_duration INTEGER,
+        default_currency TEXT,
+        default_winners INTEGER,
+        default_autocheck INTEGER
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS active_giveaway (
+        guild_id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        message_id TEXT,
+        giveaway_type TEXT NOT NULL,
+        min_xp INTEGER NOT NULL,
+        additional_requirements TEXT,
+        amount REAL,
+        currency TEXT,
+        tiers TEXT,
+        auto_check INTEGER NOT NULL DEFAULT 1,
+        hosted_by TEXT NOT NULL,
+        with_member TEXT,
+        num_winners INTEGER NOT NULL DEFAULT 1,
+        eligible_entrants TEXT NOT NULL DEFAULT '[]',
+        ineligible_entrants TEXT NOT NULL DEFAULT '[]',
+        initial_winners TEXT NOT NULL DEFAULT '[]',
+        started_at BIGINT NOT NULL,
+        duration_minutes INTEGER,
+        ends_at BIGINT,
+        is_active INTEGER NOT NULL DEFAULT 1
+      )
+    `);
+
+    console.log('✅ Database tables initialized');
+  } catch (err) {
+    console.error('Database initialization error:', err);
+  } finally {
+    client.release();
   }
 }
 
-const thrillService = new ThrillService();
-
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
-
 function dbRun(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve(this);
-    });
-  });
+  return pool.query(sql, params);
 }
 
 function dbGet(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
+  return pool.query(sql, params).then(result => result.rows[0]);
 }
 
 function dbAll(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows || []);
-    });
-  });
+  return pool.query(sql, params).then(result => result.rows || []);
 }
 
 function getBrandEmbed(title) {
@@ -461,8 +293,9 @@ async function handleMapLink(interaction) {
   const thrillUsername = interaction.options.getString('thrill_username');
 
   await dbRun(
-    `INSERT OR REPLACE INTO user_map (discord_user_id, thrill_username, updated_at)
-     VALUES (?, ?, ?)`,
+`INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (discord_user_id) DO UPDATE SET thrill_username = EXCLUDED.thrill_username, updated_at = EXCLUDED.updated_at`,
     [user.id, thrillUsername, Date.now()]
   );
 
@@ -477,7 +310,7 @@ async function handleMapEdit(interaction) {
   const newThrillUsername = interaction.options.getString('new_thrill_username');
 
   const existing = await dbGet(
-    'SELECT * FROM user_map WHERE discord_user_id = ?',
+    'SELECT * FROM user_map WHERE discord_user_id = $1',
     [user.id]
   );
 
@@ -489,7 +322,7 @@ async function handleMapEdit(interaction) {
   }
 
   await dbRun(
-    `UPDATE user_map SET thrill_username = ?, updated_at = ? WHERE discord_user_id = ?`,
+    `UPDATE user_map SET thrill_username = $1, updated_at = $2 WHERE discord_user_id = $3`,
     [newThrillUsername, Date.now(), user.id]
   );
 
@@ -503,7 +336,7 @@ async function handleMapDelete(interaction) {
   const user = interaction.options.getUser('user');
 
   const existing = await dbGet(
-    'SELECT * FROM user_map WHERE discord_user_id = ?',
+    'SELECT * FROM user_map WHERE discord_user_id = $1',
     [user.id]
   );
 
@@ -514,7 +347,7 @@ async function handleMapDelete(interaction) {
     });
   }
 
-  await dbRun('DELETE FROM user_map WHERE discord_user_id = ?', [user.id]);
+  await dbRun('DELETE FROM user_map WHERE discord_user_id = $1', [user.id]);
 
   await interaction.reply({
     content: `✅ Deleted mapping for <@${user.id}> (**${existing.thrill_username}**)`,
@@ -547,7 +380,7 @@ async function handleMapView(interaction) {
   const user = interaction.options.getUser('user');
 
   const mapping = await dbGet(
-    'SELECT * FROM user_map WHERE discord_user_id = ?',
+    'SELECT * FROM user_map WHERE discord_user_id = $1',
     [user.id]
   );
 
@@ -649,7 +482,7 @@ async function handleGiveawayStartModal(interaction) {
   }
 
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -661,7 +494,7 @@ async function handleGiveawayStartModal(interaction) {
 
   // Load server defaults
   const settings = await dbGet(
-    'SELECT * FROM server_settings WHERE guild_id = ?',
+    'SELECT * FROM server_settings WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -671,7 +504,7 @@ async function handleGiveawayStartModal(interaction) {
 
   if (templateName) {
     templateData = await dbGet(
-      'SELECT * FROM templates WHERE guild_id = ? AND name = ?',
+      'SELECT * FROM templates WHERE guild_id = $1 AND name = $2',
       [interaction.guildId, templateName]
     );
 
@@ -805,7 +638,7 @@ const updateEmbed = () => {
     } else if (i.customId === 'gw_load_template') {
       // Show template list in a separate message
       const templates = await dbAll(
-        'SELECT * FROM templates WHERE guild_id = ? ORDER BY name',
+        'SELECT * FROM templates WHERE guild_id = $1 ORDER BY name',
         [interaction.guildId]
       );
 
@@ -840,7 +673,7 @@ const updateEmbed = () => {
       // Load template values into selections
       const templateId = i.values[0];
       const template = await dbGet(
-        'SELECT * FROM templates WHERE template_id = ?',
+        'SELECT * FROM templates WHERE template_id = $1',
         [templateId]
       );
 
@@ -926,7 +759,7 @@ const updateEmbed = () => {
 // Quick start - skips Step 1 and shows Step 2 with default selections
 async function handleGiveawayQuickStart(interaction) {
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -945,7 +778,7 @@ async function handleGiveawayQuickStart(interaction) {
 
     // Load template
     const template = await dbGet(
-      'SELECT * FROM templates WHERE guild_id = ? AND name = ?',
+      'SELECT * FROM templates WHERE guild_id = $1 AND name = $2',
       [interaction.guildId, templateName]
     );
 
@@ -1051,12 +884,12 @@ embed.addFields(
     const message = await channel.send({ embeds: [embed], components: [row] });
 
     // Insert into database
-    await dbRun('DELETE FROM active_giveaway WHERE guild_id = ?', [interaction.guildId]);
+    await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [interaction.guildId]);
 
     await dbRun(
       `INSERT INTO active_giveaway 
        (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
       [
         interaction.guildId,
         channel.id,
@@ -1094,7 +927,7 @@ embed.addFields(
 
   // Load server defaults
   const settings = await dbGet(
-    'SELECT * FROM server_settings WHERE guild_id = ?',
+    'SELECT * FROM server_settings WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1160,7 +993,7 @@ async function handleGiveawayEnd(interaction) {
   await interaction.deferReply({ flags: 64 });
   
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1175,7 +1008,7 @@ async function handleGiveawayEnd(interaction) {
   const message = await channel.messages.fetch(giveaway.message_id);
 
   if (eligible.length === 0) {
-    await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = ?', [
+    await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [
       interaction.guildId,
     ]);
     
@@ -1239,7 +1072,7 @@ async function handleGiveawayEnd(interaction) {
     updateLoops.delete(interaction.guildId);
   }
 
-  await dbRun('UPDATE active_giveaway SET initial_winners = ? WHERE guild_id = ?', [
+  await dbRun('UPDATE active_giveaway SET initial_winners = $1 WHERE guild_id = $2', [
     JSON.stringify(winnerIds),
     interaction.guildId,
   ]);
@@ -1249,7 +1082,7 @@ async function handleGiveawayEnd(interaction) {
 
   for (const winnerId of winnerIds) {
     const userMap = await dbGet(
-      'SELECT thrill_username FROM user_map WHERE discord_user_id = ?',
+      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
       [winnerId]
     );
 
@@ -1317,7 +1150,7 @@ async function handleGiveawayEnd(interaction) {
     console.error(`❌ Failed to send announcement:`, err.message);
   }
 
-  await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = ?', [
+  await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [
     interaction.guildId,
   ]);
 
@@ -1328,7 +1161,7 @@ async function handleGiveawayEnd(interaction) {
 
 async function handleGiveawayCancel(interaction) {
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1339,7 +1172,7 @@ async function handleGiveawayCancel(interaction) {
     });
   }
 
-  await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = ?', [
+  await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [
     interaction.guildId,
   ]);
 
@@ -1351,7 +1184,7 @@ async function handleGiveawayCancel(interaction) {
 
 async function handleGiveawayReroll(interaction) {
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1477,7 +1310,7 @@ async function handleTemplateEdit(interaction) {
 
   // Fetch template from database
   const template = await dbGet(
-    'SELECT * FROM templates WHERE guild_id = ? AND name = ?',
+    'SELECT * FROM templates WHERE guild_id = $1 AND name = $2',
     [interaction.guildId, templateName]
   );
 
@@ -1578,7 +1411,7 @@ async function handleTemplateEdit(interaction) {
 
 async function handleTemplateList(interaction) {
   const templates = await dbAll(
-    'SELECT * FROM templates WHERE guild_id = ?',
+    'SELECT * FROM templates WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1612,7 +1445,7 @@ async function handleTemplateList(interaction) {
 async function handleTemplateDelete(interaction) {
   const name = interaction.options.getString('name');
 
-  await dbRun('DELETE FROM templates WHERE guild_id = ? AND name = ?', [
+  await dbRun('DELETE FROM templates WHERE guild_id = $1 AND name = $2', [
     interaction.guildId,
     name,
   ]);
@@ -1625,7 +1458,7 @@ async function handleTemplateDelete(interaction) {
 
 async function handleDefaultsView(interaction) {
   const settings = await dbGet(
-    'SELECT * FROM server_settings WHERE guild_id = ?',
+    'SELECT * FROM server_settings WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1651,7 +1484,7 @@ async function handleDefaultsView(interaction) {
 
 async function handleDefaultsSet(interaction) {
   const settings = await dbGet(
-    'SELECT * FROM server_settings WHERE guild_id = ?',
+    'SELECT * FROM server_settings WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1735,7 +1568,7 @@ async function handleManualCheckByThrill(interaction, thrillName) {
 
 async function handleManualCheckByUser(interaction, user) {
   const mapped = await dbGet(
-    'SELECT thrill_username FROM user_map WHERE discord_user_id = ?',
+    'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
     [user.id]
   );
 
@@ -1807,7 +1640,7 @@ async function handleButton(interaction) {
 
   if (interaction.customId === 'enter_giveaway') {
     const giveaway = await dbGet(
-      'SELECT * FROM active_giveaway WHERE guild_id = ?',
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
       [interaction.guildId]
     );
 
@@ -1829,7 +1662,7 @@ async function handleButton(interaction) {
     }
 
     const mapped = await dbGet(
-      'SELECT thrill_username FROM user_map WHERE discord_user_id = ?',
+      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
       [interaction.user.id]
     );
 
@@ -1849,7 +1682,7 @@ async function handleButton(interaction) {
       if (result.requiresManualCheck) {
         eligible.push(interaction.user.id);
         await dbRun(
-          'UPDATE active_giveaway SET eligible_entrants = ? WHERE guild_id = ?',
+          'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
           [JSON.stringify(eligible), interaction.guildId]
         );
         await updateGiveawayMessage(interaction.guildId);
@@ -1863,7 +1696,7 @@ async function handleButton(interaction) {
       if (result.blocked) {
         ineligible.push(interaction.user.id);
         await dbRun(
-          'UPDATE active_giveaway SET ineligible_entrants = ? WHERE guild_id = ?',
+          'UPDATE active_giveaway SET ineligible_entrants = $1 WHERE guild_id = $2',
           [JSON.stringify(ineligible), interaction.guildId]
         );
         await updateGiveawayMessage(interaction.guildId);
@@ -1877,7 +1710,7 @@ async function handleButton(interaction) {
 
     eligible.push(interaction.user.id);
     await dbRun(
-      'UPDATE active_giveaway SET eligible_entrants = ? WHERE guild_id = ?',
+      'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
       [JSON.stringify(eligible), interaction.guildId]
     );
 
@@ -2246,26 +2079,32 @@ async function handleModal(interaction) {
     // Build update query dynamically based on what was provided
     const updates = [];
     const values = [];
+    let paramCount = 1;
 
     if (typeInput !== null) {
-      updates.push('default_type = ?');
+      updates.push(`default_type = $${paramCount}`);
       values.push(typeInput);
+      paramCount++;
     }
     if (duration !== null) {
-      updates.push('default_duration = ?');
+      updates.push(`default_duration = $${paramCount}`);
       values.push(duration);
+      paramCount++;
     }
     if (currencyInput !== null) {
-      updates.push('default_currency = ?');
+      updates.push(`default_currency = $${paramCount}`);
       values.push(currencyInput);
+      paramCount++;
     }
     if (winners !== null) {
-      updates.push('default_winners = ?');
+      updates.push(`default_winners = $${paramCount}`);
       values.push(winners);
+      paramCount++;
     }
     if (autocheck !== null) {
-      updates.push('default_autocheck = ?');
+      updates.push(`default_autocheck = $${paramCount}`);
       values.push(autocheck);
+      paramCount++;
     }
 
     if (updates.length === 0) {
@@ -2278,13 +2117,13 @@ async function handleModal(interaction) {
 
     // Use INSERT OR IGNORE to insert if doesn't exist, then UPDATE if it does
     await dbRun(
-      `INSERT OR IGNORE INTO server_settings (guild_id) VALUES (?)`,
+      `INSERT INTO server_settings (guild_id) VALUES ($1) ON CONFLICT DO NOTHING`,
       [interaction.guildId]
     );
 
     await dbRun(
-      `UPDATE server_settings SET ${updates.join(', ')} WHERE guild_id = ?`,
-      [...values.slice(0, -1), interaction.guildId]
+      `UPDATE server_settings SET ${updates.join(', ')} WHERE guild_id = $${paramCount}`,
+      values
     );
 
     const summary = [];
@@ -2376,8 +2215,8 @@ async function handleModal(interaction) {
     if (stepData.isEditing && stepData.originalTemplateId) {
       // UPDATE existing template
       await dbRun(
-        `UPDATE templates SET name = ?, type = ?, duration = ?, num_winners = ?, auto_check = ?, min_xp = ?, amount = ?, currency = ?, with_member = ?, additional_requirements = ?
-         WHERE template_id = ?`,
+        `UPDATE templates SET name = $1, type = $2, duration = $3, num_winners = $4, auto_check = $5, min_xp = $6, amount = $7, currency = $8, with_member = $9, additional_requirements = $10
+         WHERE template_id = $11`,
         [
           stepData.name,
           stepData.type,
@@ -2398,7 +2237,7 @@ async function handleModal(interaction) {
       
       await dbRun(
         `INSERT INTO templates (guild_id, template_id, name, type, duration, num_winners, auto_check, min_xp, amount, currency, with_member, additional_requirements)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           interaction.guildId,
           templateId2,
@@ -2633,12 +2472,12 @@ embed.addFields(
     const withMember = selectedMember !== 'none' ? selectedMember : null;
 
     // Delete any old giveaway for this guild
-    await dbRun('DELETE FROM active_giveaway WHERE guild_id = ?', [interaction.guildId]);
+    await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [interaction.guildId]);
 
     await dbRun(
       `INSERT INTO active_giveaway 
        (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
       [
         interaction.guildId,
         channel.id,
@@ -2680,7 +2519,7 @@ client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [message.guildId]
   );
 
@@ -2690,7 +2529,7 @@ client.on('messageCreate', async (message) => {
   if (message.channelId !== giveawayChannel.id) return;
 
   const mapped = await dbGet(
-    'SELECT thrill_username FROM user_map WHERE discord_user_id = ?',
+    'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
     [message.author.id]
   );
 
@@ -2702,8 +2541,9 @@ client.on('messageCreate', async (message) => {
     }
 
     await dbRun(
-      `INSERT OR REPLACE INTO user_map (discord_user_id, thrill_username, updated_at) 
-       VALUES (?, ?, ?)`,
+`INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (discord_user_id) DO UPDATE SET thrill_username = EXCLUDED.thrill_username, updated_at = EXCLUDED.updated_at`,
       [message.author.id, thrillUsername, Date.now()]
     );
 
@@ -2719,7 +2559,7 @@ client.on('messageCreate', async (message) => {
       if (eligibilityResult.requiresManualCheck) {
         eligible.push(message.author.id);
         await dbRun(
-          'UPDATE active_giveaway SET eligible_entrants = ? WHERE guild_id = ?',
+          'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
           [JSON.stringify(eligible), message.guildId]
         );
 
@@ -2734,7 +2574,7 @@ client.on('messageCreate', async (message) => {
       if (eligibilityResult.blocked) {
         ineligible.push(message.author.id);
         await dbRun(
-          'UPDATE active_giveaway SET ineligible_entrants = ? WHERE guild_id = ?',
+          'UPDATE active_giveaway SET ineligible_entrants = $1 WHERE guild_id = $2',
           [JSON.stringify(ineligible), message.guildId]
         );
 
@@ -2748,14 +2588,14 @@ client.on('messageCreate', async (message) => {
 
       eligible.push(message.author.id);
       await dbRun(
-        'UPDATE active_giveaway SET eligible_entrants = ? WHERE guild_id = ?',
+        'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
         [JSON.stringify(eligible), message.guildId]
       );
     } else {
       const eligible = JSON.parse(giveaway.eligible_entrants || '[]');
       eligible.push(message.author.id);
       await dbRun(
-        'UPDATE active_giveaway SET eligible_entrants = ? WHERE guild_id = ?',
+        'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
         [JSON.stringify(eligible), message.guildId]
       );
     }
@@ -2775,7 +2615,7 @@ client.on('messageCreate', async (message) => {
 
 async function checkEligibility(thrillUsername, minXp) {
   const cached = await dbGet(
-    'SELECT * FROM eligibility_cache WHERE thrill_username = ?',
+    'SELECT * FROM eligibility_cache WHERE thrill_username = $1',
     [thrillUsername]
   );
 
@@ -2815,9 +2655,10 @@ async function checkEligibility(thrillUsername, minXp) {
   underDonic = apiResult.underDonic;
 
   await dbRun(
-    `INSERT OR REPLACE INTO eligibility_cache 
+    `INSERT INTO eligibility_cache 
      (thrill_username, last_xp, last_under_donic, last_checked_at)
-     VALUES (?, ?, ?, ?)`,
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (thrill_username) DO UPDATE SET last_xp = EXCLUDED.last_xp, last_under_donic = EXCLUDED.last_under_donic, last_checked_at = EXCLUDED.last_checked_at`,
     [thrillUsername, xp, underDonic ? 1 : 0, Date.now()]
   );
 
@@ -2853,7 +2694,7 @@ function startGiveawayUpdateLoop(guildId) {
 
   const interval = setInterval(async () => {
     const giveaway = await dbGet(
-      'SELECT * FROM active_giveaway WHERE guild_id = ?',
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
       [guildId]
     );
 
@@ -2878,7 +2719,7 @@ function startAutoEndTimer(guildId, endTime) {
 
   const timer = setTimeout(async () => {
     const giveaway = await dbGet(
-      'SELECT * FROM active_giveaway WHERE guild_id = ?',
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
       [guildId]
     );
 
@@ -2889,7 +2730,7 @@ function startAutoEndTimer(guildId, endTime) {
 
       if (eligible.length === 0) {
         console.log(`⚠️ No eligible entrants`);
-        await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = ?', [
+        await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [
           guildId,
         ]);
         try {
@@ -2934,7 +2775,7 @@ function startAutoEndTimer(guildId, endTime) {
           const message = await channel.messages.fetch(giveaway.message_id);
           console.log(`✓ Fetched message: ${message.id}`);
 
-          await dbRun('UPDATE active_giveaway SET initial_winners = ? WHERE guild_id = ?', [
+          await dbRun('UPDATE active_giveaway SET initial_winners = $1 WHERE guild_id = $2', [
             JSON.stringify(winnerIds),
             guildId,
           ]);
@@ -2943,7 +2784,7 @@ function startAutoEndTimer(guildId, endTime) {
 
           for (const winnerId of winnerIds) {
             const userMap = await dbGet(
-              'SELECT thrill_username FROM user_map WHERE discord_user_id = ?',
+              'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
               [winnerId]
             );
 
@@ -2999,7 +2840,7 @@ function startAutoEndTimer(guildId, endTime) {
           await channel.send(announcement);
           console.log(`✅ Sent announcement message`);
 
-          await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = ?', [
+          await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [
             guildId,
           ]);
         } catch (err) {
@@ -3017,7 +2858,7 @@ function startAutoEndTimer(guildId, endTime) {
 
 async function updateGiveawayMessage(guildId) {
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [guildId]
   );
 
@@ -3139,6 +2980,9 @@ function selectWinners(entrants, count) {
 // ============================================================================
 
 client.once('ready', async () => {
+  // Initialize database
+  await initializeDatabase();
+
   const commands = [
     {
       name: 'gw',
