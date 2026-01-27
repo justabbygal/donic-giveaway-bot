@@ -1446,9 +1446,8 @@ async function handleGiveawayRunback(interaction) {
 
   collector.on('collect', async (i) => {
     if (i.customId === `gw_runback_confirm_${runbackId}`) {
-      // Acknowledge the interaction first, then dismiss
-      await i.deferReply({ flags: 64 });
-      await i.deleteReply();
+      // Dismiss the confirmation message
+      await i.update({ embeds: [], components: [] });
       
       // Continue processing in the background
 
@@ -1612,19 +1611,9 @@ async function handleGiveawayRunback(interaction) {
       // Start update loop and timer
       startGiveawayUpdateLoop(interaction.guildId);
       startAutoEndTimer(interaction.guildId, endTime);
-
-      await i.channel.send({
-        content: `✅ Giveaway started! ${giveawayMessage.url}`,
-      });
     } else if (i.customId === `gw_runback_cancel_${runbackId}`) {
-      // Acknowledge the interaction first, then dismiss
-      await i.deferReply({ flags: 64 });
-      await i.deleteReply();
-      
-      // Send cancel message as new message to channel
-      await i.channel.send({
-        content: '❌ Cancelled.',
-      });
+      // Dismiss the confirmation message
+      await i.update({ embeds: [], components: [] });
     }
   });
 }
