@@ -1236,9 +1236,9 @@ async function handleGiveawayReroll(interaction) {
 async function handleGiveawayRunback(interaction) {
   await interaction.deferReply({ flags: 64 });
 
-  // Get the most recent giveaway for this guild
+  // Get the most recent COMPLETED giveaway for this guild
   const lastGiveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = $1 ORDER BY started_at DESC LIMIT 1',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1 AND is_active = 0 ORDER BY started_at DESC LIMIT 1',
     [interaction.guildId]
   );
 
@@ -3091,7 +3091,7 @@ async function updateGiveawayMessage(guildId) {
     [guildId]
   );
 
-  if (!giveaway) return;
+  if (!giveaway || !giveaway.is_active) return;
 
   const channel = await client.channels.fetch(giveaway.channel_id);
   const message = await channel.messages.fetch(giveaway.message_id);
