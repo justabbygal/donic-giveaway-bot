@@ -1446,8 +1446,8 @@ async function handleGiveawayRunback(interaction) {
 
   collector.on('collect', async (i) => {
     if (i.customId === `gw_runback_confirm_${runbackId}`) {
-      // Immediately dismiss confirmation message
-      await i.update({ components: [] });
+      // Delete the confirmation message
+      await i.message.delete();
       
       await i.deferReply({ flags: 64 });
 
@@ -1616,8 +1616,8 @@ async function handleGiveawayRunback(interaction) {
         content: `✅ Giveaway started! ${giveawayMessage.url}`,
       });
     } else if (i.customId === `gw_runback_cancel_${runbackId}`) {
-      // Immediately dismiss confirmation message
-      await i.update({ components: [] });
+      // Delete the confirmation message
+      await i.message.delete();
       
       await i.deferReply({ flags: 64 });
       await i.editReply({
