@@ -1338,10 +1338,18 @@ async function handleGiveawayCancel(interaction) {
 }
 
 async function handleGiveawayReroll(interaction) {
-  const giveaway = await dbGet(
+  let giveaway = await dbGet(
     'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
+
+  // If no active giveaway, check history (most recent one)
+  if (!giveaway) {
+    giveaway = await dbGet(
+      'SELECT * FROM giveaway_history WHERE guild_id = $1 ORDER BY id DESC LIMIT 1',
+      [interaction.guildId]
+    );
+  }
 
   if (!giveaway) {
     return await interaction.reply({
