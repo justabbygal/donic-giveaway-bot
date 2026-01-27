@@ -893,8 +893,8 @@ embed.addFields(
 
     const message = await channel.send({ embeds: [embed], components: [row] });
 
-    // Insert into database
-    await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [interaction.guildId]);
+    // Mark any existing giveaway as inactive instead of deleting
+    await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [interaction.guildId]);
 
     await dbRun(
       `INSERT INTO active_giveaway 
@@ -1272,7 +1272,9 @@ async function handleGiveawayRunback(interaction) {
   if (step1Data.minXp > 0) summaryLines.push(`**Min XP:** ${step1Data.minXp}k`);
   if (step1Data.amount) summaryLines.push(`**Amount:** ${formatAmount(step1Data.amount)}`);
   if (step1Data.withMember) summaryLines.push(`**Featured Member:** ${step1Data.withMember}`);
-  if (step1Data.otherReq) summaryLines.push(`**Additional Requirements:** Yes`);
+  if (step1Data.otherReq) {
+    summaryLines.push(`**Requirements:**\n${step1Data.otherReq}`);
+  }
 
   const runbackId = Date.now();
   const confirmButton = new ButtonBuilder()
@@ -1306,8 +1308,10 @@ async function handleGiveawayRunback(interaction) {
     if (i.customId === `gw_runback_confirm_${runbackId}`) {
       await i.deferReply({ flags: 64 });
 
-      // Start the new giveaway with the same values
+      // Calculate end time
       const endTime = Date.now() + step1Data.duration * 60000;
+
+      // Store the new giveaway values
       const newGiveaway = {
         guild_id: interaction.guildId,
         channel_id: interaction.channelId,
@@ -1324,6 +1328,9 @@ async function handleGiveawayRunback(interaction) {
         ends_at: endTime,
         duration_minutes: step1Data.duration,
       };
+
+      // Mark any existing giveaway as inactive instead of deleting
+      await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [interaction.guildId]);
 
       // Create the giveaway message
       let title = `GIVEAWAY:`;
@@ -2694,8 +2701,8 @@ embed.addFields(
 
     const withMember = selectedMember !== 'none' ? selectedMember : null;
 
-    // Delete any old giveaway for this guild
-    await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [interaction.guildId]);
+    // Mark any existing giveaway as inactive instead of deleting
+    await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [interaction.guildId]);
 
     await dbRun(
       `INSERT INTO active_giveaway 
