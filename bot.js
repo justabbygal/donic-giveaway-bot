@@ -1446,10 +1446,11 @@ async function handleGiveawayRunback(interaction) {
 
   collector.on('collect', async (i) => {
     if (i.customId === `gw_runback_confirm_${runbackId}`) {
-      // Delete the confirmation message
-      await i.message.delete();
-      
+      // Acknowledge the interaction first, then dismiss
       await i.deferReply({ flags: 64 });
+      await i.deleteReply();
+      
+      // Continue processing in the background
 
       // Calculate end time
       const endTime = Date.now() + step1Data.duration * 60000;
@@ -1612,15 +1613,16 @@ async function handleGiveawayRunback(interaction) {
       startGiveawayUpdateLoop(interaction.guildId);
       startAutoEndTimer(interaction.guildId, endTime);
 
-      await i.editReply({
+      await i.channel.send({
         content: `✅ Giveaway started! ${giveawayMessage.url}`,
       });
     } else if (i.customId === `gw_runback_cancel_${runbackId}`) {
-      // Delete the confirmation message
-      await i.message.delete();
-      
+      // Acknowledge the interaction first, then dismiss
       await i.deferReply({ flags: 64 });
-      await i.editReply({
+      await i.deleteReply();
+      
+      // Send cancel message as new message to channel
+      await i.channel.send({
         content: '❌ Cancelled.',
       });
     }
