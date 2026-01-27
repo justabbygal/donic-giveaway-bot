@@ -189,6 +189,9 @@ const step1MessageIds = new Map();
 // Map to track Load Template button interactions so we can dismiss the select menu
 const loadTemplateInteractions = new Map();
 
+// Map to track runback confirmation interactions for dismissal
+const runbackConfirmInteractions = new Map();
+
 // Map to store template creation step 1 data
 const templateCreationData = new Map();
 
@@ -1440,14 +1443,26 @@ async function handleGiveawayRunback(interaction) {
     ],
   });
 
+  // Store interaction for later dismissal when button is clicked
+  runbackConfirmInteractions.set(runbackId, interaction);
+
   // Handle button interactions
   const filter = i => i.user.id === interaction.user.id && i.customId.includes(`gw_runback`) && i.customId.includes(String(runbackId));
   const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000 });
 
   collector.on('collect', async (i) => {
     if (i.customId === `gw_runback_confirm_${runbackId}`) {
-      // Dismiss the confirmation message
-      await i.update({ embeds: [], components: [] });
+      // Dismiss the confirmation message using stored interaction
+      const storedInteraction = runbackConfirmInteractions.get(runbackId);
+      if (storedInteraction) {
+        try {
+          await storedInteraction.deleteReply();
+          runbackConfirmInteractions.delete(runbackId);
+          console.log(`✅ Dismissed runback confirmation`);
+        } catch (err) {
+          console.error(`⚠️ Could not dismiss runback confirmation:`, err.message);
+        }
+      }
       
       // Continue processing in the background
 
@@ -1612,8 +1627,17 @@ async function handleGiveawayRunback(interaction) {
       startGiveawayUpdateLoop(interaction.guildId);
       startAutoEndTimer(interaction.guildId, endTime);
     } else if (i.customId === `gw_runback_cancel_${runbackId}`) {
-      // Dismiss the confirmation message
-      await i.update({ embeds: [], components: [] });
+      // Dismiss the confirmation message using stored interaction
+      const storedInteraction = runbackConfirmInteractions.get(runbackId);
+      if (storedInteraction) {
+        try {
+          await storedInteraction.deleteReply();
+          runbackConfirmInteractions.delete(runbackId);
+          console.log(`✅ Dismissed runback confirmation (cancel)`);
+        } catch (err) {
+          console.error(`⚠️ Could not dismiss runback confirmation:`, err.message);
+        }
+      }
     }
   });
 }
