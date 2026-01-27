@@ -536,9 +536,8 @@ async function handleGiveawayStartModal(interaction) {
     );
 
     if (!templateData) {
-      return await interaction.reply({
+      return await interaction.editReply({
         content: `❌ Template "${templateName}" not found.`,
-        flags: 64,
       });
     }
   }
