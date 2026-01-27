@@ -192,6 +192,9 @@ const loadTemplateInteractions = new Map();
 // Map to track runback confirmation interactions for dismissal
 const runbackConfirmInteractions = new Map();
 
+// Map to track already-entered interactions so users can leave
+const alreadyEnteredInteractions = new Map();
+
 // Map to store template creation step 1 data
 const templateCreationData = new Map();
 
@@ -2075,9 +2078,20 @@ async function handleButton(interaction) {
     const ineligible = JSON.parse(giveaway.ineligible_entrants || '[]');
 
     if (eligible.includes(interaction.user.id) || ineligible.includes(interaction.user.id)) {
-      return await interaction.editReply({
+      const leaveButtonId = `leave_giveaway_${interaction.guildId}_${interaction.user.id}`;
+      const leaveButton = new ButtonBuilder()
+        .setCustomId(leaveButtonId)
+        .setLabel('Leave Giveaway')
+        .setStyle(ButtonStyle.Danger);
+
+      await interaction.editReply({
         content: '✅ You already entered.',
+        components: [new ActionRowBuilder().addComponents(leaveButton)],
       });
+
+      // Store interaction for later cleanup
+      alreadyEnteredInteractions.set(leaveButtonId, interaction);
+      return;
     }
 
     const mapped = await dbGet(
@@ -2134,6 +2148,67 @@ async function handleButton(interaction) {
 
     await interaction.editReply({
       content: '🍀 Entered - Good luck!',
+    });
+  }
+
+  // ===== LEAVE GIVEAWAY BUTTON HANDLER =====
+  if (interaction.customId.startsWith('leave_giveaway_')) {
+    await interaction.deferReply({ flags: 64 });
+
+    // Parse: leave_giveaway_{guildId}_{userId}
+    const parts = interaction.customId.split('_');
+    const guildId = parts[2];
+    const userId = parts[3];
+
+    const giveaway = await dbGet(
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
+      [guildId]
+    );
+
+    if (!giveaway) {
+      return await interaction.editReply({
+        content: '❌ No active giveaway.',
+      });
+    }
+
+    const eligible = JSON.parse(giveaway.eligible_entrants || '[]');
+    const ineligible = JSON.parse(giveaway.ineligible_entrants || '[]');
+
+    // Remove user from both lists
+    const eligibleIndex = eligible.indexOf(userId);
+    const ineligibleIndex = ineligible.indexOf(userId);
+
+    if (eligibleIndex > -1) {
+      eligible.splice(eligibleIndex, 1);
+    }
+    if (ineligibleIndex > -1) {
+      ineligible.splice(ineligibleIndex, 1);
+    }
+
+    // Update database
+    await dbRun(
+      'UPDATE active_giveaway SET eligible_entrants = $1, ineligible_entrants = $2 WHERE guild_id = $3',
+      [JSON.stringify(eligible), JSON.stringify(ineligible), guildId]
+    );
+
+    // Update the giveaway message
+    await updateGiveawayMessage(guildId);
+
+    // Delete the stored interaction and dismiss the "already entered" message
+    const leaveButtonId = interaction.customId;
+    const storedInteraction = alreadyEnteredInteractions.get(leaveButtonId);
+    if (storedInteraction) {
+      try {
+        await storedInteraction.deleteReply();
+        alreadyEnteredInteractions.delete(leaveButtonId);
+      } catch (err) {
+        console.error('Failed to dismiss already entered message:', err.message);
+      }
+    }
+
+    // Send ephemeral success message
+    await interaction.editReply({
+      content: '✅ You have successfully left the giveaway.',
     });
   }
 
