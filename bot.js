@@ -92,7 +92,6 @@ async function initializeDatabase() {
         additional_requirements TEXT,
         amount REAL,
         currency TEXT,
-        tiers TEXT,
         auto_check INTEGER NOT NULL DEFAULT 1,
         hosted_by TEXT NOT NULL,
         with_member TEXT,
@@ -102,8 +101,31 @@ async function initializeDatabase() {
         initial_winners TEXT NOT NULL DEFAULT '[]',
         started_at BIGINT NOT NULL,
         duration_minutes INTEGER,
-        ends_at BIGINT,
-        is_active INTEGER NOT NULL DEFAULT 1
+        ends_at BIGINT
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS giveaway_history (
+        id SERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        message_id TEXT,
+        giveaway_type TEXT NOT NULL,
+        min_xp INTEGER NOT NULL,
+        additional_requirements TEXT,
+        amount REAL,
+        currency TEXT,
+        auto_check INTEGER NOT NULL DEFAULT 1,
+        hosted_by TEXT NOT NULL,
+        with_member TEXT,
+        num_winners INTEGER NOT NULL DEFAULT 1,
+        eligible_entrants TEXT NOT NULL DEFAULT '[]',
+        ineligible_entrants TEXT NOT NULL DEFAULT '[]',
+        initial_winners TEXT NOT NULL DEFAULT '[]',
+        started_at BIGINT NOT NULL,
+        duration_minutes INTEGER,
+        ends_at BIGINT
       )
     `);
 
@@ -488,7 +510,7 @@ async function handleGiveawayStartModal(interaction) {
     [interaction.guildId]
   );
 
-  if (giveaway && giveaway.is_active) {
+  if (giveaway) {
     return await interaction.editReply({
       content: '⚠️ A giveaway is already active.',
     });
@@ -765,7 +787,7 @@ async function handleGiveawayQuickStart(interaction) {
     [interaction.guildId]
   );
 
-  if (giveaway && giveaway.is_active) {
+  if (giveaway) {
     return await interaction.reply({
       content: '⚠️ A giveaway is already active.',
       flags: 64,
@@ -893,13 +915,46 @@ embed.addFields(
 
     const message = await channel.send({ embeds: [embed], components: [row] });
 
-    // Insert into database
+    // Save current giveaway to history before deleting
+    const existingGiveaway = await dbGet(
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
+      [interaction.guildId]
+    );
+    
+    if (existingGiveaway) {
+      await dbRun(
+        `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+        [
+          existingGiveaway.guild_id,
+          existingGiveaway.channel_id,
+          existingGiveaway.message_id,
+          existingGiveaway.giveaway_type,
+          existingGiveaway.min_xp,
+          existingGiveaway.additional_requirements,
+          existingGiveaway.amount,
+          existingGiveaway.currency,
+          existingGiveaway.auto_check,
+          existingGiveaway.hosted_by,
+          existingGiveaway.with_member,
+          existingGiveaway.num_winners,
+          existingGiveaway.eligible_entrants,
+          existingGiveaway.ineligible_entrants,
+          existingGiveaway.initial_winners,
+          existingGiveaway.started_at,
+          existingGiveaway.duration_minutes,
+          existingGiveaway.ends_at,
+        ]
+      );
+    }
+
+    // Delete the old active giveaway
     await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [interaction.guildId]);
 
     await dbRun(
       `INSERT INTO active_giveaway 
-       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
       [
         interaction.guildId,
         channel.id,
@@ -919,7 +974,6 @@ embed.addFields(
         Date.now(),
         duration,
         endTime,
-        1,
       ]
     );
 
@@ -1007,7 +1061,7 @@ async function handleGiveawayEnd(interaction) {
     [interaction.guildId]
   );
 
-  if (!giveaway || !giveaway.is_active) {
+  if (!giveaway) {
     return await interaction.editReply({
       content: '❌ No active giveaway.',
     });
@@ -1018,7 +1072,33 @@ async function handleGiveawayEnd(interaction) {
   const message = await channel.messages.fetch(giveaway.message_id);
 
   if (eligible.length === 0) {
-    await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [
+    // Save to history before deleting
+    await dbRun(
+      `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+      [
+        giveaway.guild_id,
+        giveaway.channel_id,
+        giveaway.message_id,
+        giveaway.giveaway_type,
+        giveaway.min_xp,
+        giveaway.additional_requirements,
+        giveaway.amount,
+        giveaway.currency,
+        giveaway.auto_check,
+        giveaway.hosted_by,
+        giveaway.with_member,
+        giveaway.num_winners,
+        giveaway.eligible_entrants,
+        giveaway.ineligible_entrants,
+        giveaway.initial_winners,
+        giveaway.started_at,
+        giveaway.duration_minutes,
+        giveaway.ends_at,
+      ]
+    );
+
+    await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [
       interaction.guildId,
     ]);
     
@@ -1160,7 +1240,41 @@ async function handleGiveawayEnd(interaction) {
     console.error(`❌ Failed to send announcement:`, err.message);
   }
 
-  await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [
+  // Fetch updated giveaway with initial_winners before archiving
+  const updatedGiveaway = await dbGet(
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
+    [interaction.guildId]
+  );
+  
+  if (updatedGiveaway) {
+    // Save to history before deleting
+    await dbRun(
+      `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+      [
+        updatedGiveaway.guild_id,
+        updatedGiveaway.channel_id,
+        updatedGiveaway.message_id,
+        updatedGiveaway.giveaway_type,
+        updatedGiveaway.min_xp,
+        updatedGiveaway.additional_requirements,
+        updatedGiveaway.amount,
+        updatedGiveaway.currency,
+        updatedGiveaway.auto_check,
+        updatedGiveaway.hosted_by,
+        updatedGiveaway.with_member,
+        updatedGiveaway.num_winners,
+        updatedGiveaway.eligible_entrants,
+        updatedGiveaway.ineligible_entrants,
+        updatedGiveaway.initial_winners,
+        updatedGiveaway.started_at,
+        updatedGiveaway.duration_minutes,
+        updatedGiveaway.ends_at,
+      ]
+    );
+  }
+
+  await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [
     interaction.guildId,
   ]);
 
@@ -1175,14 +1289,40 @@ async function handleGiveawayCancel(interaction) {
     [interaction.guildId]
   );
 
-  if (!giveaway || !giveaway.is_active) {
+  if (!giveaway) {
     return await interaction.reply({
       content: '❌ No active giveaway.',
       flags: 64,
     });
   }
 
-  await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [
+  // Save to history before deleting
+  await dbRun(
+    `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+    [
+      giveaway.guild_id,
+      giveaway.channel_id,
+      giveaway.message_id,
+      giveaway.giveaway_type,
+      giveaway.min_xp,
+      giveaway.additional_requirements,
+      giveaway.amount,
+      giveaway.currency,
+      giveaway.auto_check,
+      giveaway.hosted_by,
+      giveaway.with_member,
+      giveaway.num_winners,
+      giveaway.eligible_entrants,
+      giveaway.ineligible_entrants,
+      giveaway.initial_winners,
+      giveaway.started_at,
+      giveaway.duration_minutes,
+      giveaway.ends_at,
+    ]
+  );
+
+  await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [
     interaction.guildId,
   ]);
 
@@ -1236,9 +1376,9 @@ async function handleGiveawayReroll(interaction) {
 async function handleGiveawayRunback(interaction) {
   await interaction.deferReply({ flags: 64 });
 
-  // Get the most recent giveaway for this guild
+  // Get the most recent COMPLETED giveaway for this guild
   const lastGiveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = $1 ORDER BY started_at DESC LIMIT 1',
+    'SELECT * FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC LIMIT 1',
     [interaction.guildId]
   );
 
@@ -1272,7 +1412,9 @@ async function handleGiveawayRunback(interaction) {
   if (step1Data.minXp > 0) summaryLines.push(`**Min XP:** ${step1Data.minXp}k`);
   if (step1Data.amount) summaryLines.push(`**Amount:** ${formatAmount(step1Data.amount)}`);
   if (step1Data.withMember) summaryLines.push(`**Featured Member:** ${step1Data.withMember}`);
-  if (step1Data.otherReq) summaryLines.push(`**Additional Requirements:** Yes`);
+  if (step1Data.otherReq) {
+    summaryLines.push(`**Requirements:**\n${step1Data.otherReq}`);
+  }
 
   const runbackId = Date.now();
   const confirmButton = new ButtonBuilder()
@@ -1306,8 +1448,10 @@ async function handleGiveawayRunback(interaction) {
     if (i.customId === `gw_runback_confirm_${runbackId}`) {
       await i.deferReply({ flags: 64 });
 
-      // Start the new giveaway with the same values
+      // Calculate end time
       const endTime = Date.now() + step1Data.duration * 60000;
+
+      // Store the new giveaway values
       const newGiveaway = {
         guild_id: interaction.guildId,
         channel_id: interaction.channelId,
@@ -1324,6 +1468,42 @@ async function handleGiveawayRunback(interaction) {
         ends_at: endTime,
         duration_minutes: step1Data.duration,
       };
+
+      // Save current giveaway to history before deleting
+      const existingGiveaway = await dbGet(
+        'SELECT * FROM active_giveaway WHERE guild_id = $1',
+        [interaction.guildId]
+      );
+      
+      if (existingGiveaway) {
+        await dbRun(
+          `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+          [
+            existingGiveaway.guild_id,
+            existingGiveaway.channel_id,
+            existingGiveaway.message_id,
+            existingGiveaway.giveaway_type,
+            existingGiveaway.min_xp,
+            existingGiveaway.additional_requirements,
+            existingGiveaway.amount,
+            existingGiveaway.currency,
+            existingGiveaway.auto_check,
+            existingGiveaway.hosted_by,
+            existingGiveaway.with_member,
+            existingGiveaway.num_winners,
+            existingGiveaway.eligible_entrants,
+            existingGiveaway.ineligible_entrants,
+            existingGiveaway.initial_winners,
+            existingGiveaway.started_at,
+            existingGiveaway.duration_minutes,
+            existingGiveaway.ends_at,
+          ]
+        );
+      }
+
+      // Delete the old active giveaway
+      await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [interaction.guildId]);
 
       // Create the giveaway message
       let title = `GIVEAWAY:`;
@@ -1404,8 +1584,8 @@ async function handleGiveawayRunback(interaction) {
 
       // Store in database
       await dbRun(
-        `INSERT INTO active_giveaway (guild_id, channel_id, message_id, giveaway_type, min_xp, amount, currency, with_member, additional_requirements, num_winners, auto_check, hosted_by, started_at, ends_at, duration_minutes, is_active, eligible_entrants, ineligible_entrants)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, '[]', '[]')`,
+        `INSERT INTO active_giveaway (guild_id, channel_id, message_id, giveaway_type, min_xp, amount, currency, with_member, additional_requirements, num_winners, auto_check, hosted_by, started_at, ends_at, duration_minutes, eligible_entrants, ineligible_entrants, initial_winners)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, '[]', '[]', '[]')`,
         [
           interaction.guildId,
           interaction.channelId,
@@ -1865,7 +2045,7 @@ async function handleButton(interaction) {
       [interaction.guildId]
     );
 
-    if (!giveaway || !giveaway.is_active) {
+    if (!giveaway) {
       return await interaction.editReply({
         content: '❌ No active giveaway.',
       });
@@ -2694,13 +2874,46 @@ embed.addFields(
 
     const withMember = selectedMember !== 'none' ? selectedMember : null;
 
-    // Delete any old giveaway for this guild
+    // Save current giveaway to history before deleting
+    const existingGiveaway = await dbGet(
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
+      [interaction.guildId]
+    );
+    
+    if (existingGiveaway) {
+      await dbRun(
+        `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+        [
+          existingGiveaway.guild_id,
+          existingGiveaway.channel_id,
+          existingGiveaway.message_id,
+          existingGiveaway.giveaway_type,
+          existingGiveaway.min_xp,
+          existingGiveaway.additional_requirements,
+          existingGiveaway.amount,
+          existingGiveaway.currency,
+          existingGiveaway.auto_check,
+          existingGiveaway.hosted_by,
+          existingGiveaway.with_member,
+          existingGiveaway.num_winners,
+          existingGiveaway.eligible_entrants,
+          existingGiveaway.ineligible_entrants,
+          existingGiveaway.initial_winners,
+          existingGiveaway.started_at,
+          existingGiveaway.duration_minutes,
+          existingGiveaway.ends_at,
+        ]
+      );
+    }
+
+    // Delete the old active giveaway
     await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [interaction.guildId]);
 
     await dbRun(
       `INSERT INTO active_giveaway 
-       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
       [
         interaction.guildId,
         channel.id,
@@ -2720,7 +2933,6 @@ embed.addFields(
         Date.now(),
         duration,
         endTime,
-        1,
       ]
     );
 
@@ -2921,7 +3133,7 @@ function startGiveawayUpdateLoop(guildId) {
       [guildId]
     );
 
-    if (!giveaway || !giveaway.is_active) {
+    if (!giveaway) {
       clearInterval(interval);
       updateLoops.delete(guildId);
       return;
@@ -2946,7 +3158,7 @@ function startAutoEndTimer(guildId, endTime) {
       [guildId]
     );
 
-    if (giveaway && giveaway.is_active) {
+    if (giveaway) {
       // Stop the update loop before editing
       if (updateLoops.has(guildId)) {
         clearInterval(updateLoops.get(guildId));
@@ -2959,7 +3171,34 @@ function startAutoEndTimer(guildId, endTime) {
 
       if (eligible.length === 0) {
         console.log(`⚠️ No eligible entrants`);
-        await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [
+        
+        // Save to history before deleting
+        await dbRun(
+          `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+          [
+            giveaway.guild_id,
+            giveaway.channel_id,
+            giveaway.message_id,
+            giveaway.giveaway_type,
+            giveaway.min_xp,
+            giveaway.additional_requirements,
+            giveaway.amount,
+            giveaway.currency,
+            giveaway.auto_check,
+            giveaway.hosted_by,
+            giveaway.with_member,
+            giveaway.num_winners,
+            giveaway.eligible_entrants,
+            giveaway.ineligible_entrants,
+            giveaway.initial_winners,
+            giveaway.started_at,
+            giveaway.duration_minutes,
+            giveaway.ends_at,
+          ]
+        );
+        
+        await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [
           guildId,
         ]);
         try {
@@ -3069,7 +3308,41 @@ function startAutoEndTimer(guildId, endTime) {
           await channel.send(announcement);
           console.log(`✅ Sent announcement message`);
 
-          await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = $1', [
+          // Fetch updated giveaway with initial_winners before archiving
+          const updatedGiveaway = await dbGet(
+            'SELECT * FROM active_giveaway WHERE guild_id = $1',
+            [guildId]
+          );
+          
+          if (updatedGiveaway) {
+            // Save to history before deleting
+            await dbRun(
+              `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+              [
+                updatedGiveaway.guild_id,
+                updatedGiveaway.channel_id,
+                updatedGiveaway.message_id,
+                updatedGiveaway.giveaway_type,
+                updatedGiveaway.min_xp,
+                updatedGiveaway.additional_requirements,
+                updatedGiveaway.amount,
+                updatedGiveaway.currency,
+                updatedGiveaway.auto_check,
+                updatedGiveaway.hosted_by,
+                updatedGiveaway.with_member,
+                updatedGiveaway.num_winners,
+                updatedGiveaway.eligible_entrants,
+                updatedGiveaway.ineligible_entrants,
+                updatedGiveaway.initial_winners,
+                updatedGiveaway.started_at,
+                updatedGiveaway.duration_minutes,
+                updatedGiveaway.ends_at,
+              ]
+            );
+          }
+
+          await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [
             guildId,
           ]);
         } catch (err) {
@@ -3200,9 +3473,9 @@ embed.addFields(
 async function selectWinners(entrants, count, guildId) {
   if (entrants.length === 0) return [];
 
-  // Get last 5 completed giveaways for this server
+  // Get last 5 completed giveaways from history for this server
   const recentGiveaways = await dbAll(
-    'SELECT initial_winners FROM active_giveaway WHERE guild_id = $1 AND is_active = 0 ORDER BY ends_at DESC LIMIT 5',
+    'SELECT initial_winners FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC LIMIT 5',
     [guildId]
   );
 
