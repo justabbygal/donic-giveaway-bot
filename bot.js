@@ -52,6 +52,67 @@ const thrillService = {
   },
 };
 
+// ============================================================================
+// SPECIAL USER MESSAGES
+// ============================================================================
+const SPECIAL_USERS = {
+  LYNCHY9595: '1055569375530319937',
+  FROCKKNOCK: '504260096914882564',
+  ANHEDONIC: '400654810791018506',
+};
+
+const MOD_MESSAGES = [
+  'Absolute legend of a mod right here',
+  'Best mod energy 🐐',
+  'Mod of the year material',
+  'Built different... as a mod ✨',
+  'This server is lucky to have you modding',
+  'Legendary mod status unlocked',
+  'Keeping the vibes right, mod legend',
+];
+
+const AGE_OF_SETH_MESSAGES = [
+  'Age of Seth is a certified SCAM 💀',
+  'Age of Seth more like Age of Yikes',
+  'Age of Seth is actual garbage, we don\'t claim it',
+  'Age of Seth is the real L in 2026',
+  'Why does Age of Seth even exist lmaooo',
+  'At least Age of Seth is better than Christmas Carol Megaways',
+  'Age of Seth = biggest scam in gaming history',
+];
+
+const ANHEDONIC_MESSAGES = [
+  'The most amazing streamer we know',
+  'Your streams are genuinely incredible',
+  'Best streamer around, no question',
+  'The GOAT of streaming',
+  'Streaming excellence personified',
+  'Your talent as a streamer is unmatched',
+  'Absolute legend of a streamer',
+  'Thanks for being such an awesome streamer',
+  'We\'re grateful for the incredible streams you provide',
+  'Thanks for making streaming look so easy',
+  'Grateful to have you streaming with us',
+];
+
+function getRandomElement(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function getSpecialEntryMessage(userId) {
+  if (userId === SPECIAL_USERS.LYNCHY9595) {
+    const allMessages = [...MOD_MESSAGES, ...AGE_OF_SETH_MESSAGES];
+    return getRandomElement(allMessages);
+  }
+  if (userId === SPECIAL_USERS.FROCKKNOCK) {
+    return getRandomElement(MOD_MESSAGES);
+  }
+  if (userId === SPECIAL_USERS.ANHEDONIC) {
+    return getRandomElement(ANHEDONIC_MESSAGES);
+  }
+  return null;
+}
+
 // Initialize database schema
 async function initializeDatabase() {
   const client = await pool.connect();
@@ -2177,8 +2238,14 @@ async function handleButton(interaction) {
 
     await updateGiveawayMessage(interaction.guildId);
 
+    const specialMessage = getSpecialEntryMessage(interaction.user.id);
+    let confirmationContent = '🍀 Entered - Good luck!';
+    if (specialMessage) {
+      confirmationContent += `\n\n${specialMessage}`;
+    }
+
     await interaction.editReply({
-      content: '🍀 Entered - Good luck!',
+      content: confirmationContent,
     });
   }
 
@@ -3487,7 +3554,7 @@ function startAutoEndTimer(guildId, endTime) {
           console.log(`✅ Updated message with winners`);
           
           // Send announcement message
-          const announcement = `\n**Giveaway Ended!**\n\n🎉 **Congratulations**\n${winnerListText}`;
+          const announcement = `\n**Giveaway Ended!**\n\n🎉 **Congratulations**\n${winnerListText.trim()}`;
           console.log(`📢 Sending announcement: ${announcement.substring(0, 50)}...`);
           await channel.send(announcement);
           console.log(`✅ Sent announcement message`);
