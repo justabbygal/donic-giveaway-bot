@@ -31,6 +31,27 @@ pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
 });
 
+// ============================================================================
+// THRILL SERVICE PLACEHOLDER
+// ============================================================================
+// Placeholder for when Thrill API is unavailable
+const thrillService = {
+  async lookupUserByUsername(username) {
+    try {
+      // If Thrill API is configured, use it here
+      // For now, return API_DOWN to trigger manual check fallback
+      return {
+        status: 'API_DOWN',
+      };
+    } catch (err) {
+      console.error('Thrill service error:', err);
+      return {
+        status: 'API_DOWN',
+      };
+    }
+  },
+};
+
 // Initialize database schema
 async function initializeDatabase() {
   const client = await pool.connect();
