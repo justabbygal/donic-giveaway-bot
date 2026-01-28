@@ -439,9 +439,10 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
 
   const memberInput = new TextInputBuilder()
     .setCustomId('gw_member')
-    .setLabel('Member to feature')
+    .setLabel('Requested by')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('e.g., "donic" (or leave blank)')
+    .setPlaceholder('Username requesting this giveaway')
+    .setHelper('Username requesting this giveaway. Example: Donic')
     .setRequired(false)
     .setValue(previousValues.member || '');
 
@@ -449,6 +450,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_amount')
     .setLabel('Amount')
     .setStyle(TextInputStyle.Short)
+    .setHelper('Whole number only. Example: 50')
     .setRequired(false)
     .setValue(previousValues.amount || '');
 
@@ -457,6 +459,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setLabel('Minimum XP in thousands')
     .setStyle(TextInputStyle.Short)
     .setPlaceholder('0')
+    .setHelper('Whole number in thousands. Example: 10 means 10k XP')
     .setRequired(false)
     .setValue(previousValues.minXp || '');
 
@@ -464,7 +467,8 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_other_req')
     .setLabel('Other Requirements (optional)')
     .setStyle(TextInputStyle.Paragraph)
-    .setPlaceholder('e.g., "Must have voted"')
+    .setPlaceholder('Additional rules')
+    .setHelper('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
     .setRequired(false)
     .setValue(previousValues.otherReq || '');
 
@@ -1022,29 +1026,33 @@ embed.addFields(
 
   const memberInput = new TextInputBuilder()
     .setCustomId('gw_member')
-    .setLabel('Member to feature')
+    .setLabel('Requested by')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('e.g., "donic" (or leave blank)')
+    .setPlaceholder('Username requesting this giveaway')
+    .setHelper('Username requesting this giveaway. Example: Donic')
     .setRequired(false);
 
   const amountInput = new TextInputBuilder()
     .setCustomId('gw_amount')
     .setLabel('Amount')
     .setStyle(TextInputStyle.Short)
+    .setHelper('Whole number only. Example: 50')
     .setRequired(false);
 
   const minXpInput = new TextInputBuilder()
     .setCustomId('gw_min_xp')
-    .setLabel('Minimum XP *in thousands*')
+    .setLabel('Minimum XP in thousands')
     .setStyle(TextInputStyle.Short)
     .setPlaceholder('0')
+    .setHelper('Whole number in thousands. Example: 10 means 10k XP')
     .setRequired(false);
 
   const otherReqInput = new TextInputBuilder()
     .setCustomId('gw_other_req')
     .setLabel('Other Requirements (optional)')
     .setStyle(TextInputStyle.Paragraph)
-    .setPlaceholder('e.g., "Must have voted"')
+    .setPlaceholder('Additional rules')
+    .setHelper('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
     .setRequired(false);
 
   modal.addComponents(
@@ -2248,9 +2256,10 @@ async function handleButton(interaction) {
 
     const memberInput = new TextInputBuilder()
       .setCustomId('template_with_member')
-      .setLabel('Member to feature')
+      .setLabel('Requested by')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('e.g., "donic" (or leave blank)')
+      .setPlaceholder('Username requesting this giveaway')
+      .setHelper('Username requesting this giveaway. Example: Donic')
       .setRequired(false);
     if (data.withMember) memberInput.setValue(data.withMember);
 
@@ -2258,14 +2267,16 @@ async function handleButton(interaction) {
       .setCustomId('template_amount')
       .setLabel('Amount')
       .setStyle(TextInputStyle.Short)
+      .setHelper('Whole number only. Example: 50')
       .setRequired(false);
     if (data.amount) amountInput.setValue(String(data.amount));
 
     const minXpInput = new TextInputBuilder()
       .setCustomId('template_min_xp')
-      .setLabel('Minimum XP *in thousands*')
+      .setLabel('Minimum XP in thousands')
       .setStyle(TextInputStyle.Short)
       .setPlaceholder('0')
+      .setHelper('Whole number in thousands. Example: 10 means 10k XP')
       .setRequired(false);
     if (data.minXp) minXpInput.setValue(String(data.minXp));
 
@@ -2273,7 +2284,8 @@ async function handleButton(interaction) {
       .setCustomId('template_additional_requirements')
       .setLabel('Other Requirements (optional)')
       .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder('Use Shift+Enter for new lines')
+      .setPlaceholder('Additional rules')
+      .setHelper('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
       .setRequired(false);
     if (data.additionalRequirements) requirementsInput.setValue(data.additionalRequirements);
 
@@ -2802,6 +2814,60 @@ async function handleModal(interaction) {
     const amountInput = interaction.fields.getTextInputValue('gw_amount') || '';
     const minXpInput = interaction.fields.getTextInputValue('gw_min_xp') || '';
     const otherReq = interaction.fields.getTextInputValue('gw_other_req') || null;
+
+    // Validate: Amount must be integer only
+    if (amountInput.trim() !== '') {
+      if (!/^\d+$/.test(amountInput.trim())) {
+        const retryId = `modal_retry_${interaction.user.id}_${Date.now()}`;
+        failedModalSubmissions.set(retryId, {
+          customId: interaction.customId,
+          member: memberInput,
+          amount: amountInput,
+          minXp: minXpInput,
+          otherReq: otherReq || '',
+          userId: interaction.user.id
+        });
+
+        const retryButton = new ButtonBuilder()
+          .setCustomId(retryId)
+          .setLabel('Retry')
+          .setStyle(ButtonStyle.Primary);
+
+        await interaction.editReply({
+          content: '❌ **Amount must be a whole number** (no $ or commas). Example: 50',
+          components: [new ActionRowBuilder().addComponents(retryButton)],
+        });
+        
+        return;
+      }
+    }
+
+    // Validate: Minimum XP must be integer only
+    if (minXpInput.trim() !== '') {
+      if (!/^\d+$/.test(minXpInput.trim())) {
+        const retryId = `modal_retry_${interaction.user.id}_${Date.now()}`;
+        failedModalSubmissions.set(retryId, {
+          customId: interaction.customId,
+          member: memberInput,
+          amount: amountInput,
+          minXp: minXpInput,
+          otherReq: otherReq || '',
+          userId: interaction.user.id
+        });
+
+        const retryButton = new ButtonBuilder()
+          .setCustomId(retryId)
+          .setLabel('Retry')
+          .setStyle(ButtonStyle.Primary);
+
+        await interaction.editReply({
+          content: '❌ **Minimum XP must be a whole number** (in thousands). Example: 10 means 10k XP',
+          components: [new ActionRowBuilder().addComponents(retryButton)],
+        });
+        
+        return;
+      }
+    }
 
     // Validate: Min XP ALWAYS requires Amount
     if (minXpInput.trim() !== '' && amountInput.trim() === '') {
