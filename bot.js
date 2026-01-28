@@ -58,10 +58,11 @@ const thrillService = {
 const SPECIAL_USERS = {
   LYNCHY9595: '1055569375530319937',
   FROCKKNOCK: '504260096914882564',
+  NATH187: '662222336417726465',
   ANHEDONIC: '400654810791018506',
 };
 
-const MOD_MESSAGES = [
+const LYNCHY_MOD_MESSAGES = [
   'Absolute legend of a mod right here',
   'Best mod energy 🐐',
   'Mod of the year material',
@@ -79,6 +80,32 @@ const AGE_OF_SETH_MESSAGES = [
   'Why does Age of Seth even exist lmaooo',
   'At least Age of Seth is better than Christmas Carol Megaways',
   'Age of Seth = biggest scam in gaming history',
+];
+
+const FROCKKNOCK_MOD_MESSAGES = [
+  'You keep Donic organized like no other mod',
+  'Solid mod work keeping this place running',
+  'You\'re a real pro at moderating',
+  'Best mod energy around',
+  'Thanks for being such a dedicated mod',
+  'Your modding makes a real difference',
+  'You handle moderation like a pro',
+  'You know how to mod right',
+  'Really appreciate you as a mod',
+  'Keep up the great modding',
+];
+
+const NATH187_MESSAGES = [
+  'Thanks for helping run these giveaways',
+  'Best giveaway helper out there',
+  'You keep these giveaways running smoothly',
+  'Appreciate all the help with giveaways',
+  'You make a real difference in these giveaways',
+  'Great work helping organize these',
+  'Giveaway support at its best',
+  'You\'re essential to making these work',
+  'Always reliable with giveaway help',
+  'Best giveaway assistant around',
 ];
 
 const ANHEDONIC_MESSAGES = [
@@ -101,11 +128,14 @@ function getRandomElement(arr) {
 
 function getSpecialEntryMessage(userId) {
   if (userId === SPECIAL_USERS.LYNCHY9595) {
-    const allMessages = [...MOD_MESSAGES, ...AGE_OF_SETH_MESSAGES];
+    const allMessages = [...LYNCHY_MOD_MESSAGES, ...AGE_OF_SETH_MESSAGES];
     return getRandomElement(allMessages);
   }
   if (userId === SPECIAL_USERS.FROCKKNOCK) {
-    return getRandomElement(MOD_MESSAGES);
+    return getRandomElement(FROCKKNOCK_MOD_MESSAGES);
+  }
+  if (userId === SPECIAL_USERS.NATH187) {
+    return getRandomElement(NATH187_MESSAGES);
   }
   if (userId === SPECIAL_USERS.ANHEDONIC) {
     return getRandomElement(ANHEDONIC_MESSAGES);
