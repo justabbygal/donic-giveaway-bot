@@ -441,8 +441,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_member')
     .setLabel('Requested by')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('Username requesting this giveaway')
-    .setHelper('Username requesting this giveaway. Example: Donic')
+    .setPlaceholder('Username requesting this giveaway. Example: Donic')
     .setRequired(false)
     .setValue(previousValues.member || '');
 
@@ -450,7 +449,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_amount')
     .setLabel('Amount')
     .setStyle(TextInputStyle.Short)
-    .setHelper('Whole number only. Example: 50')
+    .setPlaceholder('Whole number only. Example: 50')
     .setRequired(false)
     .setValue(previousValues.amount || '');
 
@@ -458,8 +457,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_min_xp')
     .setLabel('Minimum XP in thousands')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('0')
-    .setHelper('Whole number in thousands. Example: 10 means 10k XP')
+    .setPlaceholder('Whole number in thousands. Example: 10 means 10k XP')
     .setRequired(false)
     .setValue(previousValues.minXp || '');
 
@@ -467,8 +465,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_other_req')
     .setLabel('Other Requirements (optional)')
     .setStyle(TextInputStyle.Paragraph)
-    .setPlaceholder('Additional rules')
-    .setHelper('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
+    .setPlaceholder('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
     .setRequired(false)
     .setValue(previousValues.otherReq || '');
 
@@ -1028,31 +1025,28 @@ embed.addFields(
     .setCustomId('gw_member')
     .setLabel('Requested by')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('Username requesting this giveaway')
-    .setHelper('Username requesting this giveaway. Example: Donic')
+    .setPlaceholder('Username requesting this giveaway. Example: Donic')
     .setRequired(false);
 
   const amountInput = new TextInputBuilder()
     .setCustomId('gw_amount')
     .setLabel('Amount')
     .setStyle(TextInputStyle.Short)
-    .setHelper('Whole number only. Example: 50')
+    .setPlaceholder('Whole number only. Example: 50')
     .setRequired(false);
 
   const minXpInput = new TextInputBuilder()
     .setCustomId('gw_min_xp')
     .setLabel('Minimum XP in thousands')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('0')
-    .setHelper('Whole number in thousands. Example: 10 means 10k XP')
+    .setPlaceholder('Whole number in thousands. Example: 10 means 10k XP')
     .setRequired(false);
 
   const otherReqInput = new TextInputBuilder()
     .setCustomId('gw_other_req')
     .setLabel('Other Requirements (optional)')
     .setStyle(TextInputStyle.Paragraph)
-    .setPlaceholder('Additional rules')
-    .setHelper('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
+    .setPlaceholder('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
     .setRequired(false);
 
   modal.addComponents(
