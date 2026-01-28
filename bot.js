@@ -878,7 +878,7 @@ async function handleGiveawayQuickStart(interaction) {
     // Build requirements text
     let reqText = '';
     if (minXp > 0) {
-      reqText += `• ${minXp}k XP`;
+      reqText += `• Minimum ${minXp}k XP wagered`;
     }
     if (otherReq) {
       const reqLines = otherReq.split('\n');
@@ -1579,7 +1579,7 @@ async function handleGiveawayRunback(interaction) {
       // Build requirements text
       let reqText = '';
       if (step1Data.minXp > 0) {
-        reqText += `• ${step1Data.minXp}k XP`;
+        reqText += `• Minimum ${step1Data.minXp}k XP wagered`;
       }
       if (step1Data.otherReq) {
         const reqLines = step1Data.otherReq.split('\n');
@@ -2988,7 +2988,7 @@ async function handleModal(interaction) {
 
     let reqText = '';
     if (minXp > 0) {
-      reqText += `• ${minXp}k XP`;
+      reqText += `• Minimum ${minXp}k XP wagered`;
     }
     if (otherReq) {
       const reqLines = otherReq.split('\n');
@@ -3580,7 +3580,7 @@ async function updateGiveawayMessage(guildId) {
 
     let reqText = '';
     if (giveaway.min_xp > 0) {
-      reqText += `• ${giveaway.min_xp}k XP`;
+      reqText += `• Minimum ${giveaway.min_xp}k XP wagered`;
     }
     if (giveaway.additional_requirements) {
       const reqLines = giveaway.additional_requirements.split('\n');
