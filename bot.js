@@ -3754,40 +3754,91 @@ embed.addFields(
 async function selectWinners(entrants, count, guildId) {
   if (entrants.length === 0) return [];
 
-  // Get last 5 completed giveaways from history for this server
-  const recentGiveaways = await dbAll(
-    'SELECT initial_winners FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC LIMIT 5',
+  // Get all giveaway history for this server
+  const allGiveaways = await dbAll(
+    'SELECT initial_winners FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC',
     [guildId]
   );
 
-  // Extract all winners from last 5 giveaways
-  const recentWinners = new Set();
-  for (const giveaway of recentGiveaways) {
+  // Get last 5 giveaways
+  const recentGiveaways = allGiveaways.slice(0, 5);
+
+  // Count lifetime wins and recent wins for each entrant
+  const lifetimeWins = {};
+  const recentWinCounts = {};
+  
+  for (const entrant of entrants) {
+    lifetimeWins[entrant] = 0;
+    recentWinCounts[entrant] = 0;
+  }
+
+  // Count wins across all giveaways
+  for (const giveaway of allGiveaways) {
     if (giveaway.initial_winners) {
       try {
         const winners = JSON.parse(giveaway.initial_winners);
-        winners.forEach(winnerId => recentWinners.add(winnerId));
+        for (const winnerId of winners) {
+          if (entrants.includes(winnerId)) {
+            lifetimeWins[winnerId]++;
+          }
+        }
       } catch (err) {
         console.error('Failed to parse winners:', err);
       }
     }
   }
 
+  // Count wins in last 5 giveaways
+  for (const giveaway of recentGiveaways) {
+    if (giveaway.initial_winners) {
+      try {
+        const winners = JSON.parse(giveaway.initial_winners);
+        for (const winnerId of winners) {
+          if (entrants.includes(winnerId)) {
+            recentWinCounts[winnerId]++;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to parse winners:', err);
+      }
+    }
+  }
+
+  // Calculate server average wins
+  const totalWins = Object.values(lifetimeWins).reduce((a, b) => a + b, 0);
+  const validEntrants = entrants.filter(e => e); // Remove any falsy values
+  const serverAverage = validEntrants.length > 0 ? totalWins / validEntrants.length : 0;
+
+  // Calculate weights for each entrant
+  const weights = {};
+  for (const entrant of validEntrants) {
+    // Streak prevention: if they have 2+ wins in last 5, weight = 10%
+    if (recentWinCounts[entrant] >= 2) {
+      weights[entrant] = 0.1;
+    } else {
+      // Otherwise use lifetime win weighting: 1 + ((their_wins - server_average) × -0.05)
+      const wins = lifetimeWins[entrant] || 0;
+      weights[entrant] = Math.max(0.1, 1 + ((wins - serverAverage) * -0.05));
+    }
+  }
+
   const winners = [];
-  const availableEntrants = [...entrants];
+  const availableEntrants = [...validEntrants];
 
   for (let i = 0; i < Math.min(count, availableEntrants.length); i++) {
     // Create weighted list for this selection
     const weighted = [];
     for (const entrant of availableEntrants) {
-      if (recentWinners.has(entrant)) {
-        // Repeat winner - add 3 times (75% weight = 25% less chance)
-        weighted.push(entrant, entrant, entrant);
-      } else {
-        // New winner - add 4 times (100% weight)
-        weighted.push(entrant, entrant, entrant, entrant);
+      const weight = weights[entrant];
+      // Convert weight to repetitions (scale up to whole numbers)
+      // So 0.1 = 10 reps, 1.0 = 100 reps, etc.
+      const repetitions = Math.round(weight * 100);
+      for (let j = 0; j < repetitions; j++) {
+        weighted.push(entrant);
       }
     }
+
+    if (weighted.length === 0) break; // Safety check
 
     // Select winner from weighted list
     const randomIndex = Math.floor(Math.random() * weighted.length);
