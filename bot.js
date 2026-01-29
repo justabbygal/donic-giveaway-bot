@@ -70,6 +70,8 @@ const LYNCHY_MOD_MESSAGES = [
   'This server is lucky to have you modding',
   'Legendary mod status unlocked',
   'Keeping the vibes right, mod legend',
+  'Good boyyyyy',
+  'Why even enter? Bekureno will make you lose anyway. jk',
 ];
 
 const AGE_OF_SETH_MESSAGES = [
