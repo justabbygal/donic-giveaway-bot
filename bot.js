@@ -3760,8 +3760,20 @@ async function selectWinners(entrants, count, guildId) {
     [guildId]
   );
 
-  // Get last 5 giveaways
+  // Get last 5 giveaways and the most recent one
   const recentGiveaways = allGiveaways.slice(0, 5);
+  const mostRecentGiveaway = allGiveaways.length > 0 ? allGiveaways[0] : null;
+
+  // Extract winners from most recent giveaway
+  const lastGiveawayWinners = new Set();
+  if (mostRecentGiveaway && mostRecentGiveaway.initial_winners) {
+    try {
+      const winners = JSON.parse(mostRecentGiveaway.initial_winners);
+      winners.forEach(winnerId => lastGiveawayWinners.add(winnerId));
+    } catch (err) {
+      console.error('Failed to parse last giveaway winners:', err);
+    }
+  }
 
   // Count lifetime wins and recent wins for each entrant
   const lifetimeWins = {};
@@ -3812,14 +3824,21 @@ async function selectWinners(entrants, count, guildId) {
   // Calculate weights for each entrant
   const weights = {};
   for (const entrant of validEntrants) {
+    let weight;
+    
     // Streak prevention: if they have 2+ wins in last 5, weight = 10%
     if (recentWinCounts[entrant] >= 2) {
-      weights[entrant] = 0.1;
+      weight = 0.1;
+    } else if (lastGiveawayWinners.has(entrant)) {
+      // Last giveaway penalty: won the most recent giveaway = 30% weight
+      weight = 0.3;
     } else {
-      // Otherwise use lifetime win weighting: 1 + ((their_wins - server_average) × -0.05)
+      // Otherwise use lifetime win weighting: 1 + ((their_wins - server_average) × -0.15)
       const wins = lifetimeWins[entrant] || 0;
-      weights[entrant] = Math.max(0.1, 1 + ((wins - serverAverage) * -0.05));
+      weight = Math.max(0.1, 1 + ((wins - serverAverage) * -0.15));
     }
+    
+    weights[entrant] = weight;
   }
 
   const winners = [];
