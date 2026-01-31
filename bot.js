@@ -70,7 +70,7 @@ function hasRole(member, roleName) {
 
 function isAdminOrBot(member) {
   if (!member) return false;
-  return hasRole(member, 'Admin') || hasRole(member, 'donic-gw-bot');
+  return hasRole(member, 'Admin') || hasRole(member, 'Giveaway Managers');
 }
 
 function isVerified(member) {
@@ -385,14 +385,14 @@ client.on('interactionCreate', async (interaction) => {
 async function handleCommand(interaction) {
   const { commandName } = interaction;
   const member = interaction.member;
-  const hasGwModRole = member?.roles.cache.some(role => role.name === 'gw-mod');
+  const hasGwModRole = member?.roles.cache.some(role => role.name === 'Giveaway Managers');
   const isAdmin = member?.permissions.has('Administrator');
 
   if (commandName === 'gw') {
-    // Only /gw commands require gw-mod role
+    // Only /gw commands require Giveaway Managers role
     if (!hasGwModRole && !isAdmin) {
       return await interaction.reply({
-        content: '❌ You need the "gw-mod" role or admin permissions to use this command.',
+        content: '❌ You need the "Giveaway Managers" role or admin permissions to use this command.',
         flags: 64,
       });
     }
@@ -563,10 +563,10 @@ async function handleMapDelete(interaction) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
   const user = interaction.options.getUser('user');
 
-  // Check permissions - only Admin or donic-gw-bot
+  // Check permissions - only Admin or Giveaway Managers
   if (!isAdminOrBot(member)) {
     return await interaction.reply({
-      content: '❌ You need Admin or donic-gw-bot role to use this command.',
+      content: '❌ You need Admin or Giveaway Managers role to use this command.',
       flags: 64,
     });
   }
@@ -594,10 +594,10 @@ async function handleMapDelete(interaction) {
 async function handleMapList(interaction) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
-  // Check permissions - only Admin or donic-gw-bot
+  // Check permissions - only Admin or Giveaway Managers
   if (!isAdminOrBot(member)) {
     return await interaction.reply({
-      content: '❌ You need Admin or donic-gw-bot role to use this command.',
+      content: '❌ You need Admin or Giveaway Managers role to use this command.',
       flags: 64,
     });
   }
@@ -2353,6 +2353,16 @@ async function handleDefaultsSet(interaction) {
 }
 
 async function handleManualCheckByThrill(interaction, thrillName) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  
+  // Check permissions - only Admin or Giveaway Managers
+  if (!isAdminOrBot(member)) {
+    return await interaction.reply({
+      content: '❌ You need Admin or Giveaway Managers role to use this command.',
+      flags: 64,
+    });
+  }
+
   const result = await checkEligibility(thrillName, 0);
 
   if (result.requiresManualCheck) {
@@ -2376,6 +2386,16 @@ async function handleManualCheckByThrill(interaction, thrillName) {
 }
 
 async function handleManualCheckByUser(interaction, user) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  
+  // Check permissions - only Admin or Giveaway Managers
+  if (!isAdminOrBot(member)) {
+    return await interaction.reply({
+      content: '❌ You need Admin or Giveaway Managers role to use this command.',
+      flags: 64,
+    });
+  }
+
   const mapped = await dbGet(
     'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
     [user.id]
@@ -4377,6 +4397,7 @@ client.once('ready', async () => {
     {
       name: 't',
       description: 'Manage Discord ↔ Thrill username mappings',
+      defaultMemberPermissions: 0,
       options: [
         {
           type: 1,
@@ -4418,6 +4439,7 @@ client.once('ready', async () => {
     {
       name: 'gwcheck',
       description: 'Manually check user eligibility',
+      defaultMemberPermissions: 0,
       options: [
         { type: 3, name: 'thrillname', description: 'Thrill username', required: false },
         { type: 6, name: 'user', description: 'Discord user', required: false },
