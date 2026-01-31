@@ -4397,7 +4397,6 @@ client.once('ready', async () => {
     {
       name: 't',
       description: 'Manage Discord ↔ Thrill username mappings',
-      defaultMemberPermissions: 0,
       options: [
         {
           type: 1,
@@ -4439,7 +4438,6 @@ client.once('ready', async () => {
     {
       name: 'gwcheck',
       description: 'Manually check user eligibility',
-      defaultMemberPermissions: 0,
       options: [
         { type: 3, name: 'thrillname', description: 'Thrill username', required: false },
         { type: 6, name: 'user', description: 'Discord user', required: false },
