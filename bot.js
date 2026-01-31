@@ -53,6 +53,24 @@ const thrillService = {
 };
 
 // ============================================================================
+// ROLE CHECKING HELPERS
+// ============================================================================
+function hasRole(member, roleName) {
+  if (!member) return false;
+  return member.roles.cache.some(role => role.name === roleName);
+}
+
+function isAdminOrBot(member) {
+  if (!member) return false;
+  return hasRole(member, 'Admin') || hasRole(member, 'donic-gw-bot');
+}
+
+function isVerified(member) {
+  if (!member) return false;
+  return hasRole(member, 'Verified');
+}
+
+// ============================================================================
 // SPECIAL USER MESSAGES
 // ============================================================================
 const SPECIAL_USERS = {
@@ -402,7 +420,7 @@ if (!hasGwModRole && !isAdmin) {
     }
   }
 
-  if (commandName === 'gwmap') {
+  if (commandName === 't') {
     const subcommand = interaction.options.getSubcommand(false);
 
     if (subcommand === 'link') {
@@ -413,8 +431,8 @@ if (!hasGwModRole && !isAdmin) {
       await handleMapDelete(interaction);
     } else if (subcommand === 'list') {
       await handleMapList(interaction);
-    } else if (subcommand === 'view') {
-      await handleMapView(interaction);
+    } else if (subcommand === 'lookup') {
+      await handleMapLookup(interaction);
     }
   }
 
@@ -435,51 +453,105 @@ if (!hasGwModRole && !isAdmin) {
 // ============================================================================
 
 async function handleMapLink(interaction) {
-  const user = interaction.options.getUser('user');
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  const targetUser = interaction.options.getUser('user');
   const thrillUsername = interaction.options.getString('thrill_username');
 
+  // Check permissions
+  const isAdmin = isAdminOrBot(member);
+  const isVerif = isVerified(member);
+
+  if (!isAdmin && !isVerif) {
+    return await interaction.reply({
+      content: '❌ You need the Verified role or higher to use this command.',
+      flags: 64,
+    });
+  }
+
+  // If Verified role, can only link themselves
+  if (isVerif && !isAdmin) {
+    if (targetUser.id !== interaction.user.id) {
+      return await interaction.reply({
+        content: '❌ You can only link your own Discord username. Admins can link any user.',
+        flags: 64,
+      });
+    }
+  }
+
+  // Link the user
   await dbRun(
-`INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
+    `INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
      VALUES ($1, $2, $3)
      ON CONFLICT (discord_user_id) DO UPDATE SET thrill_username = EXCLUDED.thrill_username, updated_at = EXCLUDED.updated_at`,
-    [user.id, thrillUsername, Date.now()]
+    [targetUser.id, thrillUsername, Date.now()]
   );
 
   await interaction.reply({
-    content: `✅ Linked <@${user.id}> to **${thrillUsername}**`,
+    content: `✅ Linked <@${targetUser.id}> to **${thrillUsername}**`,
     flags: 64,
   });
 }
 
 async function handleMapEdit(interaction) {
-  const user = interaction.options.getUser('user');
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  const targetUser = interaction.options.getUser('user');
   const newThrillUsername = interaction.options.getString('new_thrill_username');
+
+  // Check permissions
+  const isAdmin = isAdminOrBot(member);
+  const isVerif = isVerified(member);
+
+  if (!isAdmin && !isVerif) {
+    return await interaction.reply({
+      content: '❌ You need the Verified role or higher to use this command.',
+      flags: 64,
+    });
+  }
+
+  // If Verified role, can only edit themselves
+  if (isVerif && !isAdmin) {
+    if (targetUser.id !== interaction.user.id) {
+      return await interaction.reply({
+        content: '❌ You can only edit your own mapping. Admins can edit any user.',
+        flags: 64,
+      });
+    }
+  }
 
   const existing = await dbGet(
     'SELECT * FROM user_map WHERE discord_user_id = $1',
-    [user.id]
+    [targetUser.id]
   );
 
   if (!existing) {
     return await interaction.reply({
-      content: `❌ No mapping found for <@${user.id}>. Use \`/gwmap link\` first.`,
+      content: `❌ No mapping found for <@${targetUser.id}>. Use \`/t link\` first.`,
       flags: 64,
     });
   }
 
   await dbRun(
     `UPDATE user_map SET thrill_username = $1, updated_at = $2 WHERE discord_user_id = $3`,
-    [newThrillUsername, Date.now(), user.id]
+    [newThrillUsername, Date.now(), targetUser.id]
   );
 
   await interaction.reply({
-    content: `✅ Updated <@${user.id}> mapping from **${existing.thrill_username}** to **${newThrillUsername}**`,
+    content: `✅ Updated <@${targetUser.id}> mapping from **${existing.thrill_username}** to **${newThrillUsername}**`,
     flags: 64,
   });
 }
 
 async function handleMapDelete(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
   const user = interaction.options.getUser('user');
+
+  // Check permissions - only Admin or donic-gw-bot
+  if (!isAdminOrBot(member)) {
+    return await interaction.reply({
+      content: '❌ You need Admin or donic-gw-bot role to use this command.',
+      flags: 64,
+    });
+  }
 
   const existing = await dbGet(
     'SELECT * FROM user_map WHERE discord_user_id = $1',
@@ -502,6 +574,16 @@ async function handleMapDelete(interaction) {
 }
 
 async function handleMapList(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+
+  // Check permissions - only Admin or donic-gw-bot
+  if (!isAdminOrBot(member)) {
+    return await interaction.reply({
+      content: '❌ You need Admin or donic-gw-bot role to use this command.',
+      flags: 64,
+    });
+  }
+
   const mappings = await dbAll('SELECT * FROM user_map ORDER BY updated_at DESC');
 
   if (mappings.length === 0) {
@@ -522,8 +604,17 @@ async function handleMapList(interaction) {
   });
 }
 
-async function handleMapView(interaction) {
+async function handleMapLookup(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
   const user = interaction.options.getUser('user');
+
+  // Check permissions - Verified role or higher
+  if (!isVerified(member) && !isAdminOrBot(member)) {
+    return await interaction.reply({
+      content: '❌ You need the Verified role or higher to use this command.',
+      flags: 64,
+    });
+  }
 
   const mapping = await dbGet(
     'SELECT * FROM user_map WHERE discord_user_id = $1',
@@ -4056,7 +4147,7 @@ client.once('ready', async () => {
       ],
     },
     {
-      name: 'gwmap',
+      name: 't',
       description: 'Manage Discord ↔ Thrill username mappings',
       options: [
         {
@@ -4090,8 +4181,8 @@ client.once('ready', async () => {
         },
         {
           type: 1,
-          name: 'view',
-          description: 'View a user\'s mapping',
+          name: 'lookup',
+          description: 'Look up a user\'s mapping',
           options: [{ type: 6, name: 'user', description: 'Discord user', required: true }],
         },
       ],
