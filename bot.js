@@ -383,20 +383,20 @@ client.on('interactionCreate', async (interaction) => {
 // ============================================================================
 
 async function handleCommand(interaction) {
-  // Check if user has "gw-mod" role or is admin
-const member = interaction.member;
-const hasGwModRole = member?.roles.cache.some(role => role.name === 'gw-mod');
-const isAdmin = member?.permissions.has('Administrator');
-
-if (!hasGwModRole && !isAdmin) {
-  return await interaction.reply({
-    content: '❌ You need the "gw-mod" role or admin permissions to use this command.',
-    flags: 64,
-  });
-}
   const { commandName } = interaction;
+  const member = interaction.member;
+  const hasGwModRole = member?.roles.cache.some(role => role.name === 'gw-mod');
+  const isAdmin = member?.permissions.has('Administrator');
 
   if (commandName === 'gw') {
+    // Only /gw commands require gw-mod role
+    if (!hasGwModRole && !isAdmin) {
+      return await interaction.reply({
+        content: '❌ You need the "gw-mod" role or admin permissions to use this command.',
+        flags: 64,
+      });
+    }
+
     const subcommandGroup = interaction.options.getSubcommandGroup(false);
     const subcommand = interaction.options.getSubcommand(false);
 
@@ -433,6 +433,7 @@ if (!hasGwModRole && !isAdmin) {
     }
   }
 
+  // /t commands can proceed - they have their own role-based permission checks
   if (commandName === 't') {
     const subcommand = interaction.options.getSubcommand(false);
 
