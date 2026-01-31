@@ -4425,6 +4425,18 @@ client.once('ready', async () => {
     },
   ];
 
+  // Clean up old /gwmap command if it exists
+  try {
+    const existingCommands = await client.application?.commands.fetch();
+    const gwmapCommand = existingCommands?.find(cmd => cmd.name === 'gwmap');
+    if (gwmapCommand) {
+      await gwmapCommand.delete();
+      console.log('🗑️ Deleted old /gwmap command from Discord');
+    }
+  } catch (err) {
+    console.error('Error cleaning up old /gwmap command:', err);
+  }
+
   // Register commands globally
 await client.application?.commands.set(commands);
 console.log(`✅ Slash commands registered globally`);
