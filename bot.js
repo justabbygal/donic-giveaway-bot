@@ -56,8 +56,16 @@ const thrillService = {
 // ROLE CHECKING HELPERS
 // ============================================================================
 function hasRole(member, roleName) {
-  if (!member) return false;
-  return member.roles.cache.some(role => role.name === roleName);
+  if (!member) {
+    console.log(`[hasRole] Member is null/undefined`);
+    return false;
+  }
+  const roles = Array.from(member.roles.cache.values()).map(r => r.name);
+  console.log(`[hasRole] Member has roles: ${roles.join(', ')}`);
+  console.log(`[hasRole] Checking for role: "${roleName}"`);
+  const hasIt = member.roles.cache.some(role => role.name === roleName);
+  console.log(`[hasRole] Result for "${roleName}": ${hasIt}`);
+  return hasIt;
 }
 
 function isAdminOrBot(member) {
@@ -460,8 +468,11 @@ async function handleMapLink(interaction) {
   // Check permissions
   const isAdmin = isAdminOrBot(member);
   const isVerif = isVerified(member);
+  
+  console.log(`[handleMapLink] User ${interaction.user.username}: isAdmin=${isAdmin}, isVerif=${isVerif}`);
 
   if (!isAdmin && !isVerif) {
+    console.log(`[handleMapLink] Access denied - no Admin or Verified role`);
     return await interaction.reply({
       content: '❌ You need the Verified role or higher to use this command.',
       flags: 64,
@@ -471,6 +482,7 @@ async function handleMapLink(interaction) {
   // If Verified role, can only link themselves
   if (isVerif && !isAdmin) {
     if (targetUser.id !== interaction.user.id) {
+      console.log(`[handleMapLink] Verified user tried to link someone else`);
       return await interaction.reply({
         content: '❌ You can only link your own Discord username. Admins can link any user.',
         flags: 64,
@@ -1869,7 +1881,7 @@ async function handleGiveawayCount(interaction) {
 
   // Get all giveaway history for this server
   const allGiveaways = await dbAll(
-    'SELECT initial_winners, entries FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC',
+    'SELECT initial_winners, eligible_entrants FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC',
     [interaction.guildId]
   );
 
@@ -1883,10 +1895,10 @@ async function handleGiveawayCount(interaction) {
   const userStats = {}; // { userId: { wins: 0, entries: 0 } }
 
   for (const giveaway of allGiveaways) {
-    // Count entries
-    if (giveaway.entries) {
+    // Count entries (eligible entrants)
+    if (giveaway.eligible_entrants) {
       try {
-        const entries = JSON.parse(giveaway.entries);
+        const entries = JSON.parse(giveaway.eligible_entrants);
         for (const entrantId of entries) {
           if (!userStats[entrantId]) {
             userStats[entrantId] = { wins: 0, entries: 0 };
@@ -1894,7 +1906,7 @@ async function handleGiveawayCount(interaction) {
           userStats[entrantId].entries += 1;
         }
       } catch (err) {
-        console.error('Failed to parse entries:', err);
+        console.error('Failed to parse eligible_entrants:', err);
       }
     }
 
