@@ -397,6 +397,8 @@ if (!hasGwModRole && !isAdmin) {
       await handleGiveawayReroll(interaction);
     } else if (subcommand === 'runback') {
       await handleGiveawayRunback(interaction);
+    } else if (subcommand === 'count') {
+      await handleGiveawayCount(interaction);
     }
   }
 
@@ -1765,6 +1767,69 @@ async function handleGiveawayRunback(interaction) {
         }
       }
     }
+  });
+}
+
+// ============================================================================
+// HANDLE: /gw count - Show giveaway win counts
+// ============================================================================
+async function handleGiveawayCount(interaction) {
+  await interaction.deferReply({ flags: 64 });
+
+  // Get all giveaway history for this server
+  const allGiveaways = await dbAll(
+    'SELECT initial_winners FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC',
+    [interaction.guildId]
+  );
+
+  if (allGiveaways.length === 0) {
+    return await interaction.editReply({
+      content: '❌ No giveaways have been run yet.',
+    });
+  }
+
+  // Count wins for each user
+  const winCounts = {};
+  for (const giveaway of allGiveaways) {
+    if (giveaway.initial_winners) {
+      try {
+        const winners = JSON.parse(giveaway.initial_winners);
+        for (const winnerId of winners) {
+          winCounts[winnerId] = (winCounts[winnerId] || 0) + 1;
+        }
+      } catch (err) {
+        console.error('Failed to parse winners:', err);
+      }
+    }
+  }
+
+  if (Object.keys(winCounts).length === 0) {
+    return await interaction.editReply({
+      content: '❌ No winners recorded yet.',
+    });
+  }
+
+  // Sort by win count (descending)
+  const sortedWinners = Object.entries(winCounts)
+    .sort(([, a], [, b]) => b - a);
+
+  // Build leaderboard text
+  const guild = interaction.guild;
+  let leaderboardText = '**Giveaway Win Leaderboard**\n\n';
+  
+  for (let i = 0; i < sortedWinners.length; i++) {
+    const [userId, wins] = sortedWinners[i];
+    try {
+      const member = await guild.members.fetch(userId);
+      const username = member.user.username;
+      leaderboardText += `${i + 1}. ${username} - ${wins} win${wins !== 1 ? 's' : ''}\n`;
+    } catch (err) {
+      leaderboardText += `${i + 1}. <Unknown User ${userId}> - ${wins} win${wins !== 1 ? 's' : ''}\n`;
+    }
+  }
+
+  await interaction.editReply({
+    content: leaderboardText,
   });
 }
 
@@ -3982,6 +4047,11 @@ client.once('ready', async () => {
               description: 'Set server defaults for Step 1 fields',
             },
           ],
+        },
+        {
+          type: 1,
+          name: 'count',
+          description: 'View giveaway win counts for all users',
         },
       ],
     },
