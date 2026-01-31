@@ -1946,9 +1946,7 @@ async function handleGiveawayCount(interaction) {
   const userList = [];
   
   for (const [userId, stats] of sortedUsers) {
-    // Skip users with 0 wins
-    if (stats.wins === 0) continue;
-    
+    // Include everyone who has entries, even with 0 wins
     const winPercentage = stats.entries > 0 
       ? ((stats.wins / stats.entries) * 100).toFixed(1)
       : '0.0';
@@ -4116,9 +4114,9 @@ embed.addFields(
 async function selectWinners(entrants, count, guildId) {
   if (entrants.length === 0) return [];
 
-  // Get all giveaway history for this server
+  // Get all giveaway history for this server (need eligible_entrants for entry counting)
   const allGiveaways = await dbAll(
-    'SELECT initial_winners FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC',
+    'SELECT initial_winners, eligible_entrants FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC',
     [guildId]
   );
 
@@ -4137,17 +4135,34 @@ async function selectWinners(entrants, count, guildId) {
     }
   }
 
-  // Count lifetime wins and recent wins for each entrant
+  // Count lifetime wins, recent wins, and total entries for each entrant
   const lifetimeWins = {};
   const recentWinCounts = {};
+  const entryCount = {}; // NEW: Track how many giveaways each person entered
   
   for (const entrant of entrants) {
     lifetimeWins[entrant] = 0;
     recentWinCounts[entrant] = 0;
+    entryCount[entrant] = 0;
   }
 
-  // Count wins across all giveaways
+  // Count wins and entries across all giveaways
   for (const giveaway of allGiveaways) {
+    // Count entries
+    if (giveaway.eligible_entrants) {
+      try {
+        const entrants_list = JSON.parse(giveaway.eligible_entrants);
+        for (const entrantId of entrants_list) {
+          if (entrants.includes(entrantId)) {
+            entryCount[entrantId]++;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to parse eligible_entrants:', err);
+      }
+    }
+
+    // Count wins
     if (giveaway.initial_winners) {
       try {
         const winners = JSON.parse(giveaway.initial_winners);
@@ -4187,6 +4202,8 @@ async function selectWinners(entrants, count, guildId) {
   const weights = {};
   for (const entrant of validEntrants) {
     let weight;
+    const wins = lifetimeWins[entrant] || 0;
+    const entries = entryCount[entrant] || 1; // Prevent division by zero
     
     // Streak prevention: if they have 2+ wins in last 5, weight = 10%
     if (recentWinCounts[entrant] >= 2) {
@@ -4194,10 +4211,16 @@ async function selectWinners(entrants, count, guildId) {
     } else if (lastGiveawayWinners.has(entrant)) {
       // Last giveaway penalty: won the most recent giveaway = 30% weight
       weight = 0.3;
+    } else if (wins === 0) {
+      // OPTION 3: Anyone with 0 wins gets 2.5x weight boost
+      weight = 2.5;
+    } else if ((wins === 1 || wins === 2) && entries >= 8) {
+      // OPTION 3: 1-2 wins but 8+ entries gets 1.5x weight boost
+      weight = 1.5;
     } else {
-      // Otherwise use lifetime win weighting: 1 + ((their_wins - server_average) × -0.15)
-      const wins = lifetimeWins[entrant] || 0;
-      weight = Math.max(0.1, 1 + ((wins - serverAverage) * -0.15));
+      // OPTION 3: Else use current formula but increase multiplier from 15% to 25%
+      // 1 + ((their_wins - server_average) × -0.25)
+      weight = Math.max(0.1, 1 + ((wins - serverAverage) * -0.25));
     }
     
     weights[entrant] = weight;
