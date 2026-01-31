@@ -79,6 +79,11 @@ function isVerified(member) {
 }
 
 // ============================================================================
+// PAGINATION STORAGE
+// ============================================================================
+const pagination = {}; // { paginationId: { userList, currentPage, totalPages, usersPerPage, guildId } }
+
+// ============================================================================
 // SPECIAL USER MESSAGES
 // ============================================================================
 const SPECIAL_USERS = {
@@ -1936,28 +1941,96 @@ async function handleGiveawayCount(interaction) {
   const sortedUsers = Object.entries(userStats)
     .sort(([, a], [, b]) => b.wins - a.wins);
 
-  // Build leaderboard text
+  // Get usernames
   const guild = interaction.guild;
-  let leaderboardText = '**Giveaway Win Leaderboard**\n\n';
+  const userList = [];
   
-  for (let i = 0; i < sortedUsers.length; i++) {
-    const [userId, stats] = sortedUsers[i];
+  for (const [userId, stats] of sortedUsers) {
+    // Skip users with 0 wins
+    if (stats.wins === 0) continue;
+    
     const winPercentage = stats.entries > 0 
       ? ((stats.wins / stats.entries) * 100).toFixed(1)
       : '0.0';
     
+    let username = `<Unknown User ${userId}>`;
     try {
       const member = await guild.members.fetch(userId);
-      const username = member.user.username;
-      leaderboardText += `${i + 1}. ${username} - ${stats.wins} win${stats.wins !== 1 ? 's' : ''}, ${stats.entries} entr${stats.entries !== 1 ? 'ies' : 'y'} (${winPercentage}%)\n`;
+      username = member.user.username;
     } catch (err) {
-      leaderboardText += `${i + 1}. <Unknown User ${userId}> - ${stats.wins} win${stats.wins !== 1 ? 's' : ''}, ${stats.entries} entr${stats.entries !== 1 ? 'ies' : 'y'} (${winPercentage}%)\n`;
+      // Use default
     }
+    
+    userList.push({
+      username,
+      wins: stats.wins,
+      entries: stats.entries,
+      percentage: winPercentage,
+    });
   }
 
+  // Pagination: 15 users per page
+  const usersPerPage = 15;
+  const totalPages = Math.ceil(userList.length / usersPerPage);
+
+  // Create pagination object
+  const paginationId = `gw_count_${interaction.user.id}_${Date.now()}`;
+  pagination[paginationId] = {
+    userList,
+    currentPage: 0,
+    totalPages,
+    usersPerPage,
+    guildId: interaction.guildId,
+  };
+
+  // Create first page embed
+  const embed = createCountEmbed(userList, 0, usersPerPage, totalPages);
+  
+  // Create navigation buttons
+  const buttons = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`gw_count_prev_${paginationId}`)
+        .setLabel('← Previous')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId(`gw_count_next_${paginationId}`)
+        .setLabel('Next →')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(totalPages <= 1),
+      new ButtonBuilder()
+        .setCustomId(`gw_count_close_${paginationId}`)
+        .setLabel('Close')
+        .setStyle(ButtonStyle.Danger)
+    );
+
   await interaction.editReply({
-    content: leaderboardText,
+    embeds: [embed],
+    components: [buttons],
   });
+}
+
+function createCountEmbed(userList, page, usersPerPage, totalPages) {
+  const start = page * usersPerPage;
+  const end = Math.min(start + usersPerPage, userList.length);
+  const pageUsers = userList.slice(start, end);
+
+  let description = '';
+  for (let i = 0; i < pageUsers.length; i++) {
+    const user = pageUsers[i];
+    const rank = start + i + 1;
+    description += `**${rank}.** ${user.username}\n`;
+    description += `${user.wins} win${user.wins !== 1 ? 's' : ''}, ${user.entries} entr${user.entries !== 1 ? 'ies' : 'y'} (${user.percentage}%)\n\n`;
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle('🏆 Giveaway Win Leaderboard')
+    .setDescription(description)
+    .setColor('#FFD700')
+    .setFooter({ text: `Page ${page + 1} of ${totalPages} • Total players: ${userList.length}` });
+
+  return embed;
 }
 
 async function handleTemplateCreate(interaction) {
@@ -2343,6 +2416,101 @@ async function handleManualCheckByUser(interaction, user) {
 // ============================================================================
 
 async function handleButton(interaction) {
+  // Handle giveaway count pagination
+  if (interaction.customId.startsWith('gw_count_prev_')) {
+    const paginationId = interaction.customId.replace('gw_count_prev_', '');
+    const pag = pagination[paginationId];
+    
+    if (!pag) {
+      return await interaction.reply({
+        content: '❌ Pagination expired.',
+        flags: 64,
+      });
+    }
+
+    if (pag.currentPage > 0) {
+      pag.currentPage -= 1;
+      const embed = createCountEmbed(pag.userList, pag.currentPage, pag.usersPerPage, pag.totalPages);
+      
+      const buttons = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`gw_count_prev_${paginationId}`)
+            .setLabel('← Previous')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage === 0),
+          new ButtonBuilder()
+            .setCustomId(`gw_count_next_${paginationId}`)
+            .setLabel('Next →')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage >= pag.totalPages - 1),
+          new ButtonBuilder()
+            .setCustomId(`gw_count_close_${paginationId}`)
+            .setLabel('Close')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+      await interaction.update({
+        embeds: [embed],
+        components: [buttons],
+      });
+    }
+    return;
+  }
+
+  if (interaction.customId.startsWith('gw_count_next_')) {
+    const paginationId = interaction.customId.replace('gw_count_next_', '');
+    const pag = pagination[paginationId];
+    
+    if (!pag) {
+      return await interaction.reply({
+        content: '❌ Pagination expired.',
+        flags: 64,
+      });
+    }
+
+    if (pag.currentPage < pag.totalPages - 1) {
+      pag.currentPage += 1;
+      const embed = createCountEmbed(pag.userList, pag.currentPage, pag.usersPerPage, pag.totalPages);
+      
+      const buttons = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`gw_count_prev_${paginationId}`)
+            .setLabel('← Previous')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage === 0),
+          new ButtonBuilder()
+            .setCustomId(`gw_count_next_${paginationId}`)
+            .setLabel('Next →')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage >= pag.totalPages - 1),
+          new ButtonBuilder()
+            .setCustomId(`gw_count_close_${paginationId}`)
+            .setLabel('Close')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+      await interaction.update({
+        embeds: [embed],
+        components: [buttons],
+      });
+    }
+    return;
+  }
+
+  if (interaction.customId.startsWith('gw_count_close_')) {
+    const paginationId = interaction.customId.replace('gw_count_close_', '');
+    delete pagination[paginationId];
+    
+    await interaction.update({
+      content: '✅ Leaderboard closed.',
+      embeds: [],
+      components: [],
+    });
+    return;
+  }
+
   // Handle modal retry button
   if (interaction.customId.startsWith('modal_retry_')) {
     const retryData = failedModalSubmissions.get(interaction.customId);
