@@ -1869,7 +1869,7 @@ async function handleGiveawayCount(interaction) {
 
   // Get all giveaway history for this server
   const allGiveaways = await dbAll(
-    'SELECT initial_winners FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC',
+    'SELECT initial_winners, entries FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC',
     [interaction.guildId]
   );
 
@@ -1879,14 +1879,34 @@ async function handleGiveawayCount(interaction) {
     });
   }
 
-  // Count wins for each user
-  const winCounts = {};
+  // Count wins and entries for each user
+  const userStats = {}; // { userId: { wins: 0, entries: 0 } }
+
   for (const giveaway of allGiveaways) {
+    // Count entries
+    if (giveaway.entries) {
+      try {
+        const entries = JSON.parse(giveaway.entries);
+        for (const entrantId of entries) {
+          if (!userStats[entrantId]) {
+            userStats[entrantId] = { wins: 0, entries: 0 };
+          }
+          userStats[entrantId].entries += 1;
+        }
+      } catch (err) {
+        console.error('Failed to parse entries:', err);
+      }
+    }
+
+    // Count wins
     if (giveaway.initial_winners) {
       try {
         const winners = JSON.parse(giveaway.initial_winners);
         for (const winnerId of winners) {
-          winCounts[winnerId] = (winCounts[winnerId] || 0) + 1;
+          if (!userStats[winnerId]) {
+            userStats[winnerId] = { wins: 0, entries: 0 };
+          }
+          userStats[winnerId].wins += 1;
         }
       } catch (err) {
         console.error('Failed to parse winners:', err);
@@ -1894,28 +1914,32 @@ async function handleGiveawayCount(interaction) {
     }
   }
 
-  if (Object.keys(winCounts).length === 0) {
+  if (Object.keys(userStats).length === 0) {
     return await interaction.editReply({
-      content: '❌ No winners recorded yet.',
+      content: '❌ No entries or winners recorded yet.',
     });
   }
 
   // Sort by win count (descending)
-  const sortedWinners = Object.entries(winCounts)
-    .sort(([, a], [, b]) => b - a);
+  const sortedUsers = Object.entries(userStats)
+    .sort(([, a], [, b]) => b.wins - a.wins);
 
   // Build leaderboard text
   const guild = interaction.guild;
   let leaderboardText = '**Giveaway Win Leaderboard**\n\n';
   
-  for (let i = 0; i < sortedWinners.length; i++) {
-    const [userId, wins] = sortedWinners[i];
+  for (let i = 0; i < sortedUsers.length; i++) {
+    const [userId, stats] = sortedUsers[i];
+    const winPercentage = stats.entries > 0 
+      ? ((stats.wins / stats.entries) * 100).toFixed(1)
+      : '0.0';
+    
     try {
       const member = await guild.members.fetch(userId);
       const username = member.user.username;
-      leaderboardText += `${i + 1}. ${username} - ${wins} win${wins !== 1 ? 's' : ''}\n`;
+      leaderboardText += `${i + 1}. ${username} - ${stats.wins} win${stats.wins !== 1 ? 's' : ''}, ${stats.entries} entr${stats.entries !== 1 ? 'ies' : 'y'} (${winPercentage}%)\n`;
     } catch (err) {
-      leaderboardText += `${i + 1}. <Unknown User ${userId}> - ${wins} win${wins !== 1 ? 's' : ''}\n`;
+      leaderboardText += `${i + 1}. <Unknown User ${userId}> - ${stats.wins} win${stats.wins !== 1 ? 's' : ''}, ${stats.entries} entr${stats.entries !== 1 ? 'ies' : 'y'} (${winPercentage}%)\n`;
     }
   }
 
