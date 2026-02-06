@@ -4272,6 +4272,7 @@ client.once('ready', async () => {
     {
       name: 't',
       description: 'Manage Discord ↔ Thrill username mappings',
+      defaultMemberPermissions: null,
       options: [
         {
           type: 1,
