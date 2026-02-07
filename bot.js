@@ -557,7 +557,7 @@ async function handleXpEdit(interaction) {
 
   try {
     // Insert or update XP record
-    await client.query(
+    await dbRun(
       `INSERT INTO xp_records (guild_id, discord_user_id, xp, edited_at, edited_by_id, edited_by_name)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (guild_id, discord_user_id) 
@@ -600,29 +600,28 @@ async function handleXpView(interaction) {
 
   try {
     // Get XP record
-    const xpResult = await client.query(
+    const record = await dbGet(
       'SELECT xp, edited_at, edited_by_id, edited_by_name FROM xp_records WHERE guild_id = $1 AND discord_user_id = $2',
       [guildId, targetUser.id]
     );
 
     // Get Thrill username from mapping
-    const thrillResult = await client.query(
+    const mapped = await dbGet(
       'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
       [targetUser.id]
     );
 
     const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
     const displayName = targetMember?.displayName || targetUser.username;
-    const thrillUsername = thrillResult.rows[0]?.thrill_username || 'Not linked';
+    const thrillUsername = mapped?.thrill_username || 'Not linked';
 
-    if (xpResult.rows.length === 0) {
+    if (!record) {
       return await interaction.reply({
         content: `**${displayName}** has no XP record yet.`,
         flags: 64,
       });
     }
 
-    const record = xpResult.rows[0];
     const timestamp = Math.floor(record.edited_at / 1000);
     const editorName = record.edited_by_name || 'Unknown';
     const displayXp = formatXpOutput(record.xp);
