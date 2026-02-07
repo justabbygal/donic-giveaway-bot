@@ -2049,14 +2049,14 @@ async function handleGiveawayEntrants(interaction) {
     });
   }
 
-  // Convert user IDs to Discord usernames
+  // Convert user IDs to Discord display names
   const guild = interaction.guild;
   const entrantList = [];
 
   for (const userId of entrantIds) {
     try {
       const member = await guild.members.fetch(userId);
-      entrantList.push(member.user.username);
+      entrantList.push(member.displayName);
     } catch (err) {
       // If user can't be fetched, use the ID
       entrantList.push(`<Unknown User ${userId}>`);
