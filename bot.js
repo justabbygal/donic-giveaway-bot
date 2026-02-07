@@ -2853,11 +2853,18 @@ async function handleButton(interaction) {
       [interaction.user.id]
     );
 
-    // if (!mapped) {
-    //   return await interaction.editReply({
-    //     content: '🔗 Please type your Thrill username in the giveaway channel to complete entry.',
-    //   });
-    // }
+    // If no Thrill mapping, show link prompt
+    if (!mapped) {
+      const linkButton = new ButtonBuilder()
+        .setCustomId(`link_thrill_${interaction.guildId}`)
+        .setLabel('Submit Thrill username')
+        .setStyle(ButtonStyle.Primary);
+
+      return await interaction.editReply({
+        content: `**Link your Thrill**\n\nClick the button below to provide your Thrill username.\nThis is a one-time step and won't be required for future giveaways. Once submitted, you'll be entered.\n\n⚠️ MUST BE UNDER CODE DONIC ⚠️`,
+        components: [new ActionRowBuilder().addComponents(linkButton)],
+      });
+    }
 
     if (giveaway.auto_check && mapped) {
       const result = await checkEligibility(
@@ -2970,6 +2977,29 @@ async function handleButton(interaction) {
     await interaction.editReply({
       content: '✅ You have successfully left the giveaway.',
     });
+  }
+
+  // ===== LINK THRILL BUTTON HANDLER =====
+  if (interaction.customId.startsWith('link_thrill_')) {
+    const guildId = interaction.customId.replace('link_thrill_', '');
+
+    const modal = new ModalBuilder()
+      .setCustomId(`submit_thrill_username_${guildId}`)
+      .setTitle('Link your Thrill Username');
+
+    const usernameInput = new TextInputBuilder()
+      .setCustomId('thrill_username')
+      .setLabel('Thrill Username')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('Enter your Thrill username')
+      .setRequired(true)
+      .setMinLength(1)
+      .setMaxLength(50);
+
+    const actionRow = new ActionRowBuilder().addComponents(usernameInput);
+    modal.addComponents(actionRow);
+
+    await interaction.showModal(modal);
   }
 
   // ===== TEMPLATE SELECT CONTINUE BUTTON HANDLER =====
@@ -3852,6 +3882,108 @@ embed.addFields(
 
     startGiveawayUpdateLoop(interaction.guildId);
     startAutoEndTimer(interaction.guildId, endTime);
+  }
+
+  // ===== SUBMIT THRILL USERNAME MODAL HANDLER =====
+  if (interaction.customId.startsWith('submit_thrill_username_')) {
+    await interaction.deferReply({ flags: 64 });
+
+    const guildId = interaction.customId.replace('submit_thrill_username_', '');
+    const thrillUsername = interaction.fields.getTextInputValue('thrill_username')?.trim();
+
+    if (!thrillUsername) {
+      return await interaction.editReply({
+        content: '❌ Please enter a Thrill username.',
+      });
+    }
+
+    try {
+      // Store the Thrill username mapping
+      await dbRun(
+        `INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (discord_user_id)
+         DO UPDATE SET thrill_username = $2, updated_at = $3`,
+        [interaction.user.id, thrillUsername, Date.now()]
+      );
+
+      // Get the active giveaway
+      const giveaway = await dbGet(
+        'SELECT * FROM active_giveaway WHERE guild_id = $1',
+        [guildId]
+      );
+
+      if (!giveaway) {
+        return await interaction.editReply({
+          content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!`,
+        });
+      }
+
+      const eligible = JSON.parse(giveaway.eligible_entrants || '[]');
+      const ineligible = JSON.parse(giveaway.ineligible_entrants || '[]');
+
+      // Check if already entered
+      if (eligible.includes(interaction.user.id) || ineligible.includes(interaction.user.id)) {
+        return await interaction.editReply({
+          content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n✅ You already entered.`,
+        });
+      }
+
+      // Check eligibility if auto_check is enabled
+      if (giveaway.auto_check) {
+        const result = await checkEligibility(thrillUsername, giveaway.min_xp);
+
+        if (result.requiresManualCheck) {
+          eligible.push(interaction.user.id);
+          await dbRun(
+            'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
+            [JSON.stringify(eligible), guildId]
+          );
+          await updateGiveawayMessage(guildId);
+
+          return await interaction.editReply({
+            content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code Donic + XP** if you win.`,
+          });
+        }
+
+        if (result.blocked) {
+          ineligible.push(interaction.user.id);
+          await dbRun(
+            'UPDATE active_giveaway SET ineligible_entrants = $1 WHERE guild_id = $2',
+            [JSON.stringify(ineligible), guildId]
+          );
+          await updateGiveawayMessage(guildId);
+
+          return await interaction.editReply({
+            content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n❌ ${result.reason}`,
+          });
+        }
+      }
+
+      // Add to eligible entrants
+      eligible.push(interaction.user.id);
+      await dbRun(
+        'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
+        [JSON.stringify(eligible), guildId]
+      );
+
+      await updateGiveawayMessage(guildId);
+
+      const specialMessage = getSpecialEntryMessage(interaction.user.id);
+      let confirmationContent = `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!`;
+      if (specialMessage) {
+        confirmationContent += `\n\n${specialMessage}`;
+      }
+
+      await interaction.editReply({
+        content: confirmationContent,
+      });
+    } catch (err) {
+      console.error('Error submitting Thrill username:', err);
+      await interaction.editReply({
+        content: '❌ Error saving Thrill username.',
+      });
+    }
   }
 }
 
