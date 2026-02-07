@@ -955,7 +955,7 @@ const selections = {
     duration: String(templateData?.duration || settings?.default_duration || '2'),
     currency: templateData?.currency || settings?.default_currency || 'CAD',
     winners: String(templateData?.num_winners || settings?.default_winners || '1'),
-    autoCheck: templateData ? (templateData.auto_check === 1 ? true : false) : (settings?.default_autocheck === 1 ? true : settings?.default_autocheck === 0 ? false : true),
+    autoCheck: templateData ? (templateData.auto_check === 1 ? true : false) : (settings?.default_autocheck === 1 ? true : settings?.default_autocheck === 0 ? false : false),
   };
 
   // Store template data for Step 2 preloading
@@ -1411,7 +1411,7 @@ embed.addFields(
     duration: String(settings?.default_duration || '2'),
     currency: settings?.default_currency || 'CAD',
     winners: String(settings?.default_winners || '1'),
-    autoCheck: settings?.default_autocheck === 1 ? true : settings?.default_autocheck === 0 ? false : true,
+    autoCheck: settings?.default_autocheck === 1 ? true : settings?.default_autocheck === 0 ? false : false,
   };
 
   // Store the interaction for later cleanup (just like Step 1)
@@ -1587,28 +1587,15 @@ async function handleGiveawayEnd(interaction) {
       [winnerId]
     );
 
-    let winnerText = `<@${winnerId}>`;
-
-    if (giveaway.auto_check && userMap) {
-      const eligibility = await checkEligibility(
-        userMap.thrill_username,
-        giveaway.min_xp
-      );
-
-      if (eligibility.requiresManualCheck) {
-        winnerText += ` (Please comment *fresh* screenshots of **code Donic + XP**)`;
-      } else if (eligibility.blocked) {
-        winnerText += ` ⚠️ **Ineligible**: ${eligibility.reason}`;
-      } else {
-        winnerText += ` ⭐ XP: ${formatXP(eligibility.xp)}`;
-      }
-    } else if (!giveaway.auto_check) {
-      winnerText += ` (Please comment *fresh* screenshots of **code Donic + XP**)`;
-    }
+    const thrillUsername = userMap?.thrill_username || 'Not linked';
+    let winnerText = `<@${winnerId}> -- Thrill: ${thrillUsername}`;
 
     winnerListText += winnerText + '\n';
     announcement += winnerText + '\n';
   }
+
+  winnerListText += '\n*(Please comment fresh screenshots of code Donic + XP)*';
+  announcement += '\n*(Please comment fresh screenshots of code Donic + XP)*';
 
   // Edit the original message with winners
   try {
@@ -1787,8 +1774,14 @@ async function handleGiveawayReroll(interaction) {
 
   let announcement = `🎰 **Reroll Winners** (${numToReroll} of ${giveaway.num_winners}):\n\n`;
   for (const winnerId of winnerIds) {
-    announcement += `<@${winnerId}>\n`;
+    const userMap = await dbGet(
+      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
+      [winnerId]
+    );
+    const thrillUsername = userMap?.thrill_username || 'Not linked';
+    announcement += `<@${winnerId}> -- Thrill: ${thrillUsername}\n`;
   }
+  announcement += '\n*(Please comment fresh screenshots of code Donic + XP)*';
 
   await channel.send(announcement);
 
@@ -2295,7 +2288,7 @@ async function handleTemplateCreate(interaction) {
     duration: null,
     currency: 'CAD',
     numWinners: null,
-    autoCheck: true,
+    autoCheck: false,
   });
 
   // Type select menu
@@ -4298,32 +4291,13 @@ function startAutoEndTimer(guildId, endTime) {
               [winnerId]
             );
 
-            let winnerText = `<@${winnerId}>`;
-            console.log(`🔍 Checking winner ${winnerId}: auto_check=${giveaway.auto_check}, userMap=${userMap ? 'YES' : 'NO'}`);
-
-            if (giveaway.auto_check && userMap) {
-              const eligibility = await checkEligibility(
-                userMap.thrill_username,
-                giveaway.min_xp
-              );
-
-              console.log(`📊 Eligibility result:`, eligibility);
-
-              if (eligibility.requiresManualCheck) {
-                winnerText += ` (Please comment *fresh* screenshots of **code Donic + XP**)`;
-              } else if (eligibility.blocked) {
-                winnerText += ` ⚠️ **Ineligible**: ${eligibility.reason}`;
-              } else {
-                winnerText += ` ⭐ XP: ${formatXP(eligibility.xp)}`;
-              }
-            } else if (!giveaway.auto_check) {
-              winnerText += ` (Please comment *fresh* screenshots of **code Donic + XP**)`;
-            } else {
-              console.log(`⚠️ No userMap for winner ${winnerId}`);
-            }
+            const thrillUsername = userMap?.thrill_username || 'Not linked';
+            let winnerText = `<@${winnerId}> -- Thrill: ${thrillUsername}`;
 
             winnerListText += winnerText + '\n';
           }
+
+          winnerListText += '\n*(Please comment fresh screenshots of code Donic + XP)*';
 
           const embed = EmbedBuilder.from(message.embeds[0]);
           
