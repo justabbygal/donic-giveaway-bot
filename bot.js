@@ -4337,33 +4337,6 @@ client.once('ready', async () => {
   // Register commands globally
   await client.application?.commands.set(commands);
   console.log(`✅ Slash commands registered globally`);
-
-  // Also register commands per-guild for instant availability
-  const registerGuildCommands = async (guild) => {
-    try {
-      await guild.commands.set(commands);
-      console.log(`✅ Slash commands registered for guild: ${guild.name} (${guild.id})`);
-    } catch (err) {
-      console.error(`❌ Error registering commands for guild ${guild.name}:`, err);
-    }
-  };
-
-  // Register for all current guilds
-  for (const guild of client.guilds.cache.values()) {
-    await registerGuildCommands(guild);
-  }
-});
-
-// Register commands when bot joins a new guild
-client.on('guildCreate', async (guild) => {
-  const commands = getCommands();
-
-  try {
-    await guild.commands.set(commands);
-    console.log(`✅ Slash commands registered for new guild: ${guild.name} (${guild.id})`);
-  } catch (err) {
-    console.error(`❌ Error registering commands for new guild ${guild.name}:`, err);
-  }
 });
 
 // ============================================================================
