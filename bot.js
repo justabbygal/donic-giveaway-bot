@@ -430,6 +430,8 @@ async function handleCommand(interaction) {
       await handleGiveawayRunback(interaction);
     } else if (subcommand === 'count') {
       await handleGiveawayCount(interaction);
+    } else if (subcommand === 'entrants') {
+      await handleGiveawayEntrants(interaction);
     }
   }
 
@@ -829,7 +831,7 @@ const updateEmbed = () => {
       .setCustomId('gw_winners_select')
       .setPlaceholder('Number of Winners')
       .addOptions(
-        Array.from({ length: 10 }, (_, idx) => ({
+        Array.from({ length: 6 }, (_, idx) => ({
           label: idx + 1 === 1 ? '1 winner' : `${idx + 1} winners`,
           value: String(idx + 1),
           default: String(idx + 1) === selections.winners,
@@ -1597,10 +1599,16 @@ async function handleGiveawayReroll(interaction) {
     });
   }
 
-  const winnerIds = await selectWinners(availableForReroll, giveaway.num_winners, interaction.guildId);
+  // Get how_many option from command (default to all winners if not provided)
+  const howMany = interaction.options.getInteger('how_many') || giveaway.num_winners;
+
+  // Validate howMany doesn't exceed available entrants
+  const numToReroll = Math.min(howMany, availableForReroll.length);
+
+  const winnerIds = await selectWinners(availableForReroll, numToReroll, interaction.guildId);
   const channel = await client.channels.fetch(giveaway.channel_id);
 
-  let announcement = '🎰 **Reroll Winners:**\n\n';
+  let announcement = `🎰 **Reroll Winners** (${numToReroll} of ${giveaway.num_winners}):\n\n`;
   for (const winnerId of winnerIds) {
     announcement += `<@${winnerId}>\n`;
   }
@@ -1608,7 +1616,7 @@ async function handleGiveawayReroll(interaction) {
   await channel.send(announcement);
 
   await interaction.reply({
-    content: `✅ Reroll complete (initial winners excluded).`,
+    content: `✅ Reroll complete - ${numToReroll} winner${numToReroll !== 1 ? 's' : ''} selected (initial winners excluded).`,
     flags: 64,
   });
 }
@@ -2010,6 +2018,72 @@ async function handleGiveawayCount(interaction) {
   });
 }
 
+async function handleGiveawayEntrants(interaction) {
+  await interaction.deferReply({ flags: 64 }); // Ephemeral reply
+
+  // Get the most recent completed giveaway
+  const recentGiveaway = await dbGet(
+    'SELECT eligible_entrants FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC LIMIT 1',
+    [interaction.guildId]
+  );
+
+  if (!recentGiveaway || !recentGiveaway.eligible_entrants) {
+    return await interaction.editReply({
+      content: '❌ No giveaways have been completed yet.',
+    });
+  }
+
+  let entrantIds = [];
+  try {
+    entrantIds = JSON.parse(recentGiveaway.eligible_entrants);
+  } catch (err) {
+    console.error('Failed to parse eligible_entrants:', err);
+    return await interaction.editReply({
+      content: '❌ Error retrieving eligible entrants.',
+    });
+  }
+
+  if (entrantIds.length === 0) {
+    return await interaction.editReply({
+      content: '❌ The most recent giveaway had no eligible entrants.',
+    });
+  }
+
+  // Convert user IDs to Discord usernames
+  const guild = interaction.guild;
+  const entrantList = [];
+
+  for (const userId of entrantIds) {
+    try {
+      const member = await guild.members.fetch(userId);
+      entrantList.push(member.user.username);
+    } catch (err) {
+      // If user can't be fetched, use the ID
+      entrantList.push(`<Unknown User ${userId}>`);
+    }
+  }
+
+  // Sort alphabetically for readability
+  entrantList.sort();
+
+  // Create formatted list
+  let entrantsText = entrantList.map((name, idx) => `${idx + 1}. ${name}`).join('\n');
+
+  // Break into chunks if too long (Discord message limit)
+  const maxChars = 2000;
+  let message = `✅ **Eligible Entrants** (${entrantList.length} total)\n\n${entrantsText}`;
+
+  if (message.length > maxChars) {
+    // Create multiple messages if needed
+    entrantsText = entrantList.join('\n');
+    message = `✅ **Eligible Entrants** (${entrantList.length} total)\n\n${entrantsText}`;
+  }
+
+  await interaction.editReply({
+    content: message,
+  });
+}
+
 function createCountEmbed(userList, page, usersPerPage, totalPages) {
   const start = page * usersPerPage;
   const end = Math.min(start + usersPerPage, userList.length);
@@ -2083,7 +2157,7 @@ async function handleTemplateCreate(interaction) {
     .setCustomId(`template_winners_select_${templateId}`)
     .setPlaceholder('Number of Winners')
     .addOptions(
-      Array.from({ length: 10 }, (_, idx) => ({
+      Array.from({ length: 6 }, (_, idx) => ({
         label: idx + 1 === 1 ? '1 winner' : `${idx + 1} winners`,
         value: String(idx + 1),
       }))
@@ -2186,7 +2260,7 @@ async function handleTemplateEdit(interaction) {
     .setCustomId(`template_winners_select_${templateId}`)
     .setPlaceholder('Number of Winners')
     .addOptions(
-      Array.from({ length: 10 }, (_, idx) => ({
+      Array.from({ length: 6 }, (_, idx) => ({
         label: idx + 1 === 1 ? '1 winner' : `${idx + 1} winners`,
         value: String(idx + 1),
         default: template.num_winners === idx + 1,
@@ -4199,6 +4273,16 @@ function getCommands() {
           type: 1,
           name: 'reroll',
           description: 'Reroll winner(s) (excludes initial winners)',
+          options: [
+            {
+              type: 4,
+              name: 'how_many',
+              description: 'Number of winners to reroll (default: all)',
+              required: false,
+              min_value: 1,
+              max_value: 6,
+            },
+          ],
         },
         {
           type: 1,
@@ -4260,6 +4344,11 @@ function getCommands() {
           type: 1,
           name: 'count',
           description: 'View giveaway win counts for all users',
+        },
+        {
+          type: 1,
+          name: 'entrants',
+          description: 'View eligible entrants from the most recent giveaway',
         },
       ],
     },
