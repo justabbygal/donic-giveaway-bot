@@ -274,6 +274,18 @@ async function initializeDatabase() {
       )
     `);
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS xp_records (
+        guild_id TEXT,
+        discord_user_id TEXT,
+        xp INTEGER NOT NULL,
+        edited_at BIGINT NOT NULL,
+        edited_by_id TEXT NOT NULL,
+        edited_by_name TEXT NOT NULL,
+        PRIMARY KEY (guild_id, discord_user_id)
+      )
+    `);
+
     console.log('✅ Database tables initialized');
   } catch (err) {
     console.error('Database initialization error:', err);
@@ -461,6 +473,125 @@ async function handleCommand(interaction) {
     } else if (user) {
       await handleManualCheckByUser(interaction, user);
     }
+  }
+
+  if (commandName === 'xp') {
+    const subcommand = interaction.options.getSubcommand();
+
+    if (subcommand === 'edit') {
+      await handleXpEdit(interaction);
+    } else if (subcommand === 'view') {
+      await handleXpView(interaction);
+    }
+  }
+}
+
+// ============================================================================
+// XP HANDLERS
+// ============================================================================
+
+async function handleXpEdit(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+
+  // Check permissions
+  const isManager = member.roles.cache.has(process.env.GIVEAWAY_MANAGER_ROLE_ID);
+  const isAdmin = isAdminOrBot(member);
+
+  if (!isManager && !isAdmin) {
+    return await interaction.reply({
+      content: '❌ You need Giveaway Manager or Admin role to use this command.',
+      flags: 64,
+    });
+  }
+
+  const targetUser = interaction.options.getUser('member');
+  const xpAmount = interaction.options.getInteger('xp');
+  const guildId = interaction.guildId;
+  const now = Date.now();
+
+  try {
+    // Insert or update XP record
+    await client.query(
+      `INSERT INTO xp_records (guild_id, discord_user_id, xp, edited_at, edited_by_id, edited_by_name)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (guild_id, discord_user_id) 
+       DO UPDATE SET xp = $3, edited_at = $4, edited_by_id = $5, edited_by_name = $6`,
+      [guildId, targetUser.id, xpAmount, now, interaction.user.id, interaction.user.username]
+    );
+
+    const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+    const displayName = targetMember?.displayName || targetUser.username;
+
+    await interaction.reply({
+      content: `✅ XP updated for **${displayName}**\n\n• XP: ${xpAmount}\n• Timestamp: <t:${Math.floor(now / 1000)}:F>\n• Updated by: ${interaction.user.username}`,
+      flags: 64,
+    });
+  } catch (err) {
+    console.error('XP edit error:', err);
+    await interaction.reply({
+      content: '❌ Error updating XP record.',
+      flags: 64,
+    });
+  }
+}
+
+async function handleXpView(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+
+  // Check permissions
+  const isManager = member.roles.cache.has(process.env.GIVEAWAY_MANAGER_ROLE_ID);
+  const isAdmin = isAdminOrBot(member);
+
+  if (!isManager && !isAdmin) {
+    return await interaction.reply({
+      content: '❌ You need Giveaway Manager or Admin role to use this command.',
+      flags: 64,
+    });
+  }
+
+  const targetUser = interaction.options.getUser('member');
+  const guildId = interaction.guildId;
+
+  try {
+    // Get XP record
+    const xpResult = await client.query(
+      'SELECT xp, edited_at, edited_by_id, edited_by_name FROM xp_records WHERE guild_id = $1 AND discord_user_id = $2',
+      [guildId, targetUser.id]
+    );
+
+    // Get Thrill username from mapping
+    const thrillResult = await client.query(
+      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
+      [targetUser.id]
+    );
+
+    const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+    const displayName = targetMember?.displayName || targetUser.username;
+    const thrillUsername = thrillResult.rows[0]?.thrill_username || 'Not linked';
+
+    if (xpResult.rows.length === 0) {
+      return await interaction.reply({
+        content: `**${displayName}** has no XP record yet.`,
+        flags: 64,
+      });
+    }
+
+    const record = xpResult.rows[0];
+    const timestamp = Math.floor(record.edited_at / 1000);
+    const editorName = record.edited_by_name || 'Unknown';
+
+    const message = `**${displayName}**\n\n• Thrill: ${thrillUsername}\n• XP: ${record.xp}\n• XP Date: <t:${timestamp}:F>\n• Verified by: ${editorName}`;
+
+    await interaction.reply({
+      content: message,
+      flags: 64,
+    });
+  } catch (err) {
+    console.error('XP view error:', err);
+    await interaction.reply({
+      content: '❌ Error fetching XP record.',
+      flags: 64,
+    });
   }
 }
 
@@ -4400,6 +4531,29 @@ function getCommands() {
       options: [
         { type: 3, name: 'thrillname', description: 'Thrill username', required: false },
         { type: 6, name: 'user', description: 'Discord user', required: false },
+      ],
+    },
+    {
+      name: 'xp',
+      description: 'Manage XP records',
+      options: [
+        {
+          type: 1,
+          name: 'edit',
+          description: 'Edit a member\'s XP',
+          options: [
+            { type: 6, name: 'member', description: 'Discord member', required: true },
+            { type: 4, name: 'xp', description: 'XP amount', required: true, min_value: 0 },
+          ],
+        },
+        {
+          type: 1,
+          name: 'view',
+          description: 'View a member\'s XP record',
+          options: [
+            { type: 6, name: 'member', description: 'Discord member', required: true },
+          ],
+        },
       ],
     },
   ];
