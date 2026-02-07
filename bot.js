@@ -490,6 +490,40 @@ async function handleCommand(interaction) {
 // XP HANDLERS
 // ============================================================================
 
+function parseXpInput(input) {
+  // Validate input format: number with optional k/m suffix
+  const match = input.trim().match(/^(\d+(?:\.\d+)?)\s*([km])?$/i);
+  
+  if (!match) {
+    return { valid: false, error: 'Invalid format. Use: 5000, 2.5k, or 1.2M' };
+  }
+
+  const value = parseFloat(match[1]);
+  const suffix = match[2]?.toLowerCase();
+
+  let numericValue = value;
+  if (suffix === 'k') {
+    numericValue = value * 1000;
+  } else if (suffix === 'm') {
+    numericValue = value * 1000000;
+  }
+
+  return { valid: true, numeric: Math.floor(numericValue), original: input.trim() };
+}
+
+function formatXpOutput(numericValue) {
+  if (numericValue >= 1000000 && numericValue % 1000000 === 0) {
+    return `${numericValue / 1000000}M`;
+  } else if (numericValue >= 1000000) {
+    return `${(numericValue / 1000000).toFixed(1).replace(/\.0$/, '')}M`;
+  } else if (numericValue >= 1000 && numericValue % 1000 === 0) {
+    return `${numericValue / 1000}k`;
+  } else if (numericValue >= 1000) {
+    return `${(numericValue / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  }
+  return `${numericValue}`;
+}
+
 async function handleXpEdit(interaction) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
@@ -505,9 +539,21 @@ async function handleXpEdit(interaction) {
   }
 
   const targetUser = interaction.options.getUser('member');
-  const xpAmount = interaction.options.getInteger('xp');
+  const xpInput = interaction.options.getString('xp');
   const guildId = interaction.guildId;
   const now = Date.now();
+
+  // Parse and validate XP input
+  const parseResult = parseXpInput(xpInput);
+  if (!parseResult.valid) {
+    return await interaction.reply({
+      content: `❌ ${parseResult.error}`,
+      flags: 64,
+    });
+  }
+
+  const xpAmount = parseResult.numeric;
+  const displayXp = formatXpOutput(xpAmount);
 
   try {
     // Insert or update XP record
@@ -523,7 +569,7 @@ async function handleXpEdit(interaction) {
     const displayName = targetMember?.displayName || targetUser.username;
 
     await interaction.reply({
-      content: `✅ XP updated for **${displayName}**\n\n• XP: ${xpAmount}\n• Timestamp: <t:${Math.floor(now / 1000)}:F>\n• Updated by: ${interaction.user.username}`,
+      content: `✅ XP updated for **${displayName}**\n\n• XP: ${displayXp}\n• Timestamp: <t:${Math.floor(now / 1000)}:F>\n• Updated by: ${interaction.user.username}`,
       flags: 64,
     });
   } catch (err) {
@@ -579,8 +625,9 @@ async function handleXpView(interaction) {
     const record = xpResult.rows[0];
     const timestamp = Math.floor(record.edited_at / 1000);
     const editorName = record.edited_by_name || 'Unknown';
+    const displayXp = formatXpOutput(record.xp);
 
-    const message = `**${displayName}**\n\n• Thrill: ${thrillUsername}\n• XP: ${record.xp}\n• XP Date: <t:${timestamp}:F>\n• Verified by: ${editorName}`;
+    const message = `**${displayName}**\n\n• Thrill: ${thrillUsername}\n• XP: ${displayXp}\n• XP Date: <t:${timestamp}:F>\n• Verified by: ${editorName}`;
 
     await interaction.reply({
       content: message,
@@ -4543,7 +4590,7 @@ function getCommands() {
           description: 'Edit a member\'s XP',
           options: [
             { type: 6, name: 'member', description: 'Discord member', required: true },
-            { type: 4, name: 'xp', description: 'XP amount', required: true, min_value: 0 },
+            { type: 3, name: 'xp', description: 'XP amount (e.g. 5000, 5k, 2M)', required: true },
           ],
         },
         {
