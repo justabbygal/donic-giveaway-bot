@@ -11,7 +11,7 @@ const {
   TextInputStyle,
 } = require('discord.js');
 const dotenv = require('dotenv');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const axios = require('axios');
 
 if (process.env.NODE_ENV !== 'production') {
@@ -22,277 +22,288 @@ console.log('All env vars:', Object.keys(process.env).slice(0, 10));
 // DATABASE SETUP
 // ============================================================================
 
-const dbPath = process.env.DATABASE_PATH || './giveaway.db';
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Database error:', err);
-  } else {
-    console.log('✅ Connected to SQLite database');
-  }
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS user_map (
-      discord_user_id TEXT PRIMARY KEY,
-      thrill_username TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS eligibility_cache (
-      thrill_username TEXT PRIMARY KEY,
-      last_xp INTEGER,
-      last_under_donic INTEGER,
-      last_checked_at INTEGER NOT NULL
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS templates (
-      guild_id TEXT,
-      template_id TEXT,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      duration TEXT,
-      num_winners INTEGER,
-      auto_check INTEGER,
-      min_xp INTEGER,
-      amount REAL,
-      currency TEXT,
-      tiers TEXT,
-      with_member TEXT,
-      additional_requirements TEXT,
-      PRIMARY KEY (guild_id, template_id)
-    )
-  `);
-
-  db.run(`DROP TABLE IF EXISTS server_settings`);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS server_settings (
-      guild_id TEXT PRIMARY KEY,
-      default_type TEXT,
-      default_duration INTEGER,
-      default_currency TEXT,
-      default_winners INTEGER,
-      default_autocheck INTEGER
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS active_giveaway (
-      guild_id TEXT PRIMARY KEY,
-      channel_id TEXT NOT NULL,
-      message_id TEXT,
-      giveaway_type TEXT NOT NULL,
-      min_xp INTEGER NOT NULL,
-      additional_requirements TEXT,
-      amount REAL,
-      currency TEXT,
-      tiers TEXT,
-      auto_check INTEGER NOT NULL DEFAULT 1,
-      hosted_by TEXT NOT NULL,
-      with_member TEXT,
-      num_winners INTEGER NOT NULL DEFAULT 1,
-      eligible_entrants TEXT NOT NULL DEFAULT '[]',
-      ineligible_entrants TEXT NOT NULL DEFAULT '[]',
-      initial_winners TEXT NOT NULL DEFAULT '[]',
-      started_at INTEGER NOT NULL,
-      duration_minutes INTEGER,
-      ends_at INTEGER,
-      is_active INTEGER NOT NULL DEFAULT 1
-    )
-  `);
-
-  db.run(`
-    ALTER TABLE active_giveaway 
-    ADD COLUMN additional_requirements TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-      // Column already exists, no action needed
-    } else if (err) {
-      // Ignore other errors
-    }
-  });
-
-  db.run(`
-    ALTER TABLE active_giveaway 
-    ADD COLUMN hosted_by TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-      // Column already exists, no action needed
-    } else if (err) {
-      // Ignore other errors
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN with_member TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-      // Column already exists, no action needed
-    } else if (err) {
-      // Ignore other errors
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN num_winners INTEGER DEFAULT 1
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-      // Column already exists, no action needed
-    } else if (err) {
-      // Ignore other errors
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN eligible_entrants TEXT DEFAULT '[]'
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN ineligible_entrants TEXT DEFAULT '[]'
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN initial_winners TEXT DEFAULT '[]'
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-  db.run(`
-    ALTER TABLE active_giveaway
-    ADD COLUMN duration_minutes INTEGER
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  // Add missing columns to templates table
-  db.run(`
-    ALTER TABLE templates
-    ADD COLUMN duration TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  db.run(`
-    ALTER TABLE templates
-    ADD COLUMN num_winners INTEGER
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  db.run(`
-    ALTER TABLE templates
-    ADD COLUMN auto_check INTEGER
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  db.run(`
-    ALTER TABLE templates
-    ADD COLUMN with_member TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  db.run(`
-    ALTER TABLE templates
-    ADD COLUMN additional_requirements TEXT
-  `, (err) => {
-    if (err && err.message.includes('duplicate column')) {
-    } else if (err) {
-    }
-  });
-
-  console.log('✅ Database tables initialized');
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
 });
 
 // ============================================================================
-// THRILL API SERVICE
+// THRILL SERVICE PLACEHOLDER
 // ============================================================================
-
-class ThrillService {
-  constructor() {
-    this.baseUrl = process.env.THRILL_API_BASE_URL;
-    this.apiKey = process.env.THRILL_API_KEY;
-  }
-
+// Placeholder for when Thrill API is unavailable
+const thrillService = {
   async lookupUserByUsername(username) {
     try {
-      const response = await axios.get(`${this.baseUrl}/users/${username}`, {
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        timeout: 5000,
-      });
-
+      // If Thrill API is configured, use it here
+      // For now, return API_DOWN to trigger manual check fallback
       return {
-        xp: response.data.xp || 0,
-        underDonic: response.data.underDonic || false,
+        status: 'API_DOWN',
       };
-    } catch (error) {
-      if (error.response?.status === 404) {
-        return { status: 'NOT_FOUND' };
-      }
-      console.error(`Thrill API error for ${username}:`, error.message);
-      return { status: 'API_DOWN' };
+    } catch (err) {
+      console.error('Thrill service error:', err);
+      return {
+        status: 'API_DOWN',
+      };
     }
+  },
+};
+
+// ============================================================================
+// ROLE CHECKING HELPERS
+// ============================================================================
+function hasRole(member, roleName) {
+  if (!member) {
+    console.log(`[hasRole] Member is null/undefined`);
+    return false;
+  }
+  const roles = Array.from(member.roles.cache.values()).map(r => r.name);
+  console.log(`[hasRole] Member has roles: ${roles.join(', ')}`);
+  console.log(`[hasRole] Checking for role: "${roleName}"`);
+  const hasIt = member.roles.cache.some(role => role.name === roleName);
+  console.log(`[hasRole] Result for "${roleName}": ${hasIt}`);
+  return hasIt;
+}
+
+function isAdminOrBot(member) {
+  if (!member) return false;
+  return hasRole(member, 'Admin') || hasRole(member, 'Giveaway Managers');
+}
+
+function isVerified(member) {
+  if (!member) return false;
+  return hasRole(member, 'Verified');
+}
+
+// ============================================================================
+// PAGINATION STORAGE
+// ============================================================================
+const pagination = {}; // { paginationId: { userList, currentPage, totalPages, usersPerPage, guildId } }
+
+// ============================================================================
+// SPECIAL USER MESSAGES
+// ============================================================================
+const SPECIAL_USERS = {
+  LYNCHY9595: '1055569375530319937',
+  FROCKKNOCK: '504260096914882564',
+  NATH187: '662222336417726465',
+  ANHEDONIC: '400654810791018506',
+};
+
+const LYNCHY_MOD_MESSAGES = [
+  'Absolute legend of a mod right here',
+  'Best mod energy 🐐',
+  'Mod of the year material',
+  'Built different... as a mod ✨',
+  'This server is lucky to have you modding',
+  'Legendary mod status unlocked',
+  'Keeping the vibes right, mod legend',
+  'Good boyyyyy',
+  'Why even enter? Bekureno will make you lose anyway. jk',
+];
+
+const AGE_OF_SETH_MESSAGES = [
+  'Age of Seth is a certified SCAM 💀',
+  'Age of Seth more like Age of Yikes',
+  'Age of Seth is actual garbage, we don\'t claim it',
+  'Age of Seth is the real L in 2026',
+  'Why does Age of Seth even exist lmaooo',
+  'At least Age of Seth is better than Christmas Carol Megaways',
+  'Age of Seth = biggest scam in gaming history',
+];
+
+const FROCKKNOCK_MOD_MESSAGES = [
+  'You keep Donic organized like no other mod',
+  'Solid mod work keeping this place running',
+  'You\'re a real pro at moderating',
+  'Best mod energy around',
+  'Thanks for being such a dedicated mod',
+  'Your modding makes a real difference',
+  'You handle moderation like a pro',
+  'You know how to mod right',
+  'Really appreciate you as a mod',
+  'Keep up the great modding',
+];
+
+const NATH187_MESSAGES = [
+  'Thanks for helping run these giveaways',
+  'Best giveaway helper out there',
+  'You keep these giveaways running smoothly',
+  'Appreciate all the help with giveaways',
+  'You make a real difference in these giveaways',
+  'Great work helping organize these',
+  'Giveaway support at its best',
+  'You\'re essential to making these work',
+  'Always reliable with giveaway help',
+  'Best giveaway assistant around',
+];
+
+const ANHEDONIC_MESSAGES = [
+  'The most amazing streamer we know',
+  'Your streams are genuinely incredible',
+  'Best streamer around, no question',
+  'The GOAT of streaming',
+  'Streaming excellence personified',
+  'Your talent as a streamer is unmatched',
+  'Absolute legend of a streamer',
+  'Thanks for being such an awesome streamer',
+  'We\'re grateful for the incredible streams you provide',
+  'Thanks for making streaming look so easy',
+  'Grateful to have you streaming with us',
+];
+
+function getRandomElement(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function getSpecialEntryMessage(userId) {
+  if (userId === SPECIAL_USERS.LYNCHY9595) {
+    const allMessages = [...LYNCHY_MOD_MESSAGES, ...AGE_OF_SETH_MESSAGES];
+    return getRandomElement(allMessages);
+  }
+  if (userId === SPECIAL_USERS.FROCKKNOCK) {
+    return getRandomElement(FROCKKNOCK_MOD_MESSAGES);
+  }
+  if (userId === SPECIAL_USERS.NATH187) {
+    return getRandomElement(NATH187_MESSAGES);
+  }
+  if (userId === SPECIAL_USERS.ANHEDONIC) {
+    return getRandomElement(ANHEDONIC_MESSAGES);
+  }
+  return null;
+}
+
+// Initialize database schema
+async function initializeDatabase() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_map (
+        discord_user_id TEXT PRIMARY KEY,
+        thrill_username TEXT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eligibility_cache (
+        thrill_username TEXT PRIMARY KEY,
+        last_xp INTEGER,
+        last_under_donic INTEGER,
+        last_checked_at BIGINT NOT NULL
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS templates (
+        guild_id TEXT,
+        template_id TEXT,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        duration TEXT,
+        num_winners INTEGER,
+        auto_check INTEGER,
+        min_xp INTEGER,
+        amount REAL,
+        currency TEXT,
+        tiers TEXT,
+        with_member TEXT,
+        additional_requirements TEXT,
+        PRIMARY KEY (guild_id, template_id)
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS server_settings (
+        guild_id TEXT PRIMARY KEY,
+        default_type TEXT,
+        default_duration INTEGER,
+        default_currency TEXT,
+        default_winners INTEGER,
+        default_autocheck INTEGER
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS active_giveaway (
+        guild_id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        message_id TEXT,
+        giveaway_type TEXT NOT NULL,
+        min_xp INTEGER NOT NULL,
+        additional_requirements TEXT,
+        amount REAL,
+        currency TEXT,
+        auto_check INTEGER NOT NULL DEFAULT 1,
+        hosted_by TEXT NOT NULL,
+        with_member TEXT,
+        num_winners INTEGER NOT NULL DEFAULT 1,
+        eligible_entrants TEXT NOT NULL DEFAULT '[]',
+        ineligible_entrants TEXT NOT NULL DEFAULT '[]',
+        initial_winners TEXT NOT NULL DEFAULT '[]',
+        started_at BIGINT NOT NULL,
+        duration_minutes INTEGER,
+        ends_at BIGINT
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS giveaway_history (
+        id SERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        message_id TEXT,
+        giveaway_type TEXT NOT NULL,
+        min_xp INTEGER NOT NULL,
+        additional_requirements TEXT,
+        amount REAL,
+        currency TEXT,
+        auto_check INTEGER NOT NULL DEFAULT 1,
+        hosted_by TEXT NOT NULL,
+        with_member TEXT,
+        num_winners INTEGER NOT NULL DEFAULT 1,
+        eligible_entrants TEXT NOT NULL DEFAULT '[]',
+        ineligible_entrants TEXT NOT NULL DEFAULT '[]',
+        initial_winners TEXT NOT NULL DEFAULT '[]',
+        started_at BIGINT NOT NULL,
+        duration_minutes INTEGER,
+        ends_at BIGINT
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS xp_records (
+        guild_id TEXT,
+        discord_user_id TEXT,
+        xp INTEGER NOT NULL,
+        edited_at BIGINT NOT NULL,
+        edited_by_id TEXT NOT NULL,
+        edited_by_name TEXT NOT NULL,
+        PRIMARY KEY (guild_id, discord_user_id)
+      )
+    `);
+
+    console.log('✅ Database tables initialized');
+  } catch (err) {
+    console.error('Database initialization error:', err);
+  } finally {
+    client.release();
   }
 }
 
-const thrillService = new ThrillService();
-
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
-
 function dbRun(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve(this);
-    });
-  });
+  return pool.query(sql, params);
 }
 
 function dbGet(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
+  return pool.query(sql, params).then(result => result.rows[0]);
 }
 
 function dbAll(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows || []);
-    });
-  });
+  return pool.query(sql, params).then(result => result.rows || []);
 }
 
 function getBrandEmbed(title) {
@@ -326,7 +337,7 @@ function formatDiscordTimestamp(endTime) {
 // DISCORD BOT
 // ============================================================================
 
-// Map to track original Step 1 interactions for cleanup
+// Map to track original Step 1 interactions for cleanup.
 const step1Interactions = new Map();
 
 // Map to store Step 1 message IDs so Load Template can find them
@@ -334,6 +345,12 @@ const step1MessageIds = new Map();
 
 // Map to track Load Template button interactions so we can dismiss the select menu
 const loadTemplateInteractions = new Map();
+
+// Map to track runback confirmation interactions for dismissal
+const runbackConfirmInteractions = new Map();
+
+// Map to track already-entered interactions so users can leave
+const alreadyEnteredInteractions = new Map();
 
 // Map to store template creation step 1 data
 const templateCreationData = new Map();
@@ -378,20 +395,20 @@ client.on('interactionCreate', async (interaction) => {
 // ============================================================================
 
 async function handleCommand(interaction) {
-  // Check if user has "gw-mod" role or is admin
-const member = interaction.member;
-const hasGwModRole = member?.roles.cache.some(role => role.name === 'gw-mod');
-const isAdmin = member?.permissions.has('Administrator');
-
-if (!hasGwModRole && !isAdmin) {
-  return await interaction.reply({
-    content: '❌ You need the "gw-mod" role or admin permissions to use this command.',
-    flags: 64,
-  });
-}
   const { commandName } = interaction;
+  const member = interaction.member;
+  const hasGwModRole = member?.roles.cache.some(role => role.name === 'Giveaway Managers');
+  const isAdmin = member?.permissions.has('Administrator');
 
   if (commandName === 'gw') {
+    // Only /gw commands require Giveaway Managers role
+    if (!hasGwModRole && !isAdmin) {
+      return await interaction.reply({
+        content: '❌ You need the "Giveaway Managers" role or admin permissions to use this command.',
+        flags: 64,
+      });
+    }
+
     const subcommandGroup = interaction.options.getSubcommandGroup(false);
     const subcommand = interaction.options.getSubcommand(false);
 
@@ -421,9 +438,16 @@ if (!hasGwModRole && !isAdmin) {
       await handleGiveawayCancel(interaction);
     } else if (subcommand === 'reroll') {
       await handleGiveawayReroll(interaction);
+    } else if (subcommand === 'runback') {
+      await handleGiveawayRunback(interaction);
+    } else if (subcommand === 'count') {
+      await handleGiveawayCount(interaction);
+    } else if (subcommand === 'entrants') {
+      await handleGiveawayEntrants(interaction);
     }
   }
 
+  // /t commands can proceed - they have their own role-based permission checks
   if (commandName === 't') {
     const subcommand = interaction.options.getSubcommand(false);
 
@@ -450,60 +474,284 @@ if (!hasGwModRole && !isAdmin) {
       await handleManualCheckByUser(interaction, user);
     }
   }
+
+  if (commandName === 'xp') {
+    const subcommand = interaction.options.getSubcommand();
+
+    if (subcommand === 'edit') {
+      await handleXpEdit(interaction);
+    } else if (subcommand === 'view') {
+      await handleXpView(interaction);
+    }
+  }
 }
 
 // ============================================================================
-// THRILL MAPPING HANDLERS (/t)
+// XP HANDLERS
+// ============================================================================
+
+function parseXpInput(input) {
+  // Validate input format: number with optional k/m suffix
+  const match = input.trim().match(/^(\d+(?:\.\d+)?)\s*([km])?$/i);
+  
+  if (!match) {
+    return { valid: false, error: 'Invalid format. Use: 5000, 2.5k, or 1.2M' };
+  }
+
+  const value = parseFloat(match[1]);
+  const suffix = match[2]?.toLowerCase();
+
+  let numericValue = value;
+  if (suffix === 'k') {
+    numericValue = value * 1000;
+  } else if (suffix === 'm') {
+    numericValue = value * 1000000;
+  }
+
+  return { valid: true, numeric: Math.floor(numericValue), original: input.trim() };
+}
+
+function formatXpOutput(numericValue) {
+  if (numericValue >= 1000000 && numericValue % 1000000 === 0) {
+    return `${numericValue / 1000000}M`;
+  } else if (numericValue >= 1000000) {
+    return `${(numericValue / 1000000).toFixed(1).replace(/\.0$/, '')}M`;
+  } else if (numericValue >= 1000 && numericValue % 1000 === 0) {
+    return `${numericValue / 1000}k`;
+  } else if (numericValue >= 1000) {
+    return `${(numericValue / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  }
+  return `${numericValue}`;
+}
+
+async function handleXpEdit(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+
+  // Check permissions
+  const isManager = member.roles.cache.has(process.env.GIVEAWAY_MANAGER_ROLE_ID);
+  const isAdmin = isAdminOrBot(member);
+
+  if (!isManager && !isAdmin) {
+    return await interaction.reply({
+      content: '❌ You need Giveaway Manager or Admin role to use this command.',
+      flags: 64,
+    });
+  }
+
+  const targetUser = interaction.options.getUser('member');
+  const xpInput = interaction.options.getString('xp');
+  const guildId = interaction.guildId;
+  const now = Date.now();
+
+  // Parse and validate XP input
+  const parseResult = parseXpInput(xpInput);
+  if (!parseResult.valid) {
+    return await interaction.reply({
+      content: `❌ ${parseResult.error}`,
+      flags: 64,
+    });
+  }
+
+  const xpAmount = parseResult.numeric;
+  const displayXp = formatXpOutput(xpAmount);
+
+  try {
+    // Insert or update XP record
+    await dbRun(
+      `INSERT INTO xp_records (guild_id, discord_user_id, xp, edited_at, edited_by_id, edited_by_name)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (guild_id, discord_user_id) 
+       DO UPDATE SET xp = $3, edited_at = $4, edited_by_id = $5, edited_by_name = $6`,
+      [guildId, targetUser.id, xpAmount, now, interaction.user.id, interaction.user.username]
+    );
+
+    const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+    const displayName = targetMember?.displayName || targetUser.username;
+
+    await interaction.reply({
+      content: `✅ XP updated for **${displayName}**\n\n• XP: ${displayXp}\n• Timestamp: <t:${Math.floor(now / 1000)}:F>\n• Updated by: ${interaction.user.username}`,
+      flags: 64,
+    });
+  } catch (err) {
+    console.error('XP edit error:', err);
+    await interaction.reply({
+      content: '❌ Error updating XP record.',
+      flags: 64,
+    });
+  }
+}
+
+async function handleXpView(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+
+  // Check permissions
+  const isManager = member.roles.cache.has(process.env.GIVEAWAY_MANAGER_ROLE_ID);
+  const isAdmin = isAdminOrBot(member);
+
+  if (!isManager && !isAdmin) {
+    return await interaction.reply({
+      content: '❌ You need Giveaway Manager or Admin role to use this command.',
+      flags: 64,
+    });
+  }
+
+  const targetUser = interaction.options.getUser('member');
+  const guildId = interaction.guildId;
+
+  try {
+    // Get XP record
+    const record = await dbGet(
+      'SELECT xp, edited_at, edited_by_id, edited_by_name FROM xp_records WHERE guild_id = $1 AND discord_user_id = $2',
+      [guildId, targetUser.id]
+    );
+
+    // Get Thrill username from mapping
+    const mapped = await dbGet(
+      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
+      [targetUser.id]
+    );
+
+    const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+    const displayName = targetMember?.displayName || targetUser.username;
+    const thrillUsername = mapped?.thrill_username || 'Not linked';
+
+    if (!record) {
+      return await interaction.reply({
+        content: `**${displayName}** has no XP record yet.`,
+        flags: 64,
+      });
+    }
+
+    const timestamp = Math.floor(record.edited_at / 1000);
+    const editorName = record.edited_by_name || 'Unknown';
+    const displayXp = formatXpOutput(record.xp);
+
+    const message = `**${displayName}**\n\n• Thrill: ${thrillUsername}\n• XP: ${displayXp}\n• XP Date: <t:${timestamp}:F>\n• Verified by: ${editorName}`;
+
+    await interaction.reply({
+      content: message,
+      flags: 64,
+    });
+  } catch (err) {
+    console.error('XP view error:', err);
+    await interaction.reply({
+      content: '❌ Error fetching XP record.',
+      flags: 64,
+    });
+  }
+}
+
+// ============================================================================
+// GWMAP HANDLERS
 // ============================================================================
 
 async function handleMapLink(interaction) {
-  const user = interaction.options.getUser('user');
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  const targetUser = interaction.options.getUser('user');
   const thrillUsername = interaction.options.getString('thrill_username');
 
+  // Check permissions
+  const isAdmin = isAdminOrBot(member);
+  const isVerif = isVerified(member);
+  
+  console.log(`[handleMapLink] User ${interaction.user.username}: isAdmin=${isAdmin}, isVerif=${isVerif}`);
+
+  if (!isAdmin && !isVerif) {
+    console.log(`[handleMapLink] Access denied - no Admin or Verified role`);
+    return await interaction.reply({
+      content: '❌ You need the Verified role or higher to use this command.',
+      flags: 64,
+    });
+  }
+
+  // If Verified role, can only link themselves
+  if (isVerif && !isAdmin) {
+    if (targetUser.id !== interaction.user.id) {
+      console.log(`[handleMapLink] Verified user tried to link someone else`);
+      return await interaction.reply({
+        content: '❌ You can only link your own Discord username. Admins can link any user.',
+        flags: 64,
+      });
+    }
+  }
+
+  // Link the user
   await dbRun(
-    `INSERT OR REPLACE INTO user_map (discord_user_id, thrill_username, updated_at)
-     VALUES (?, ?, ?)`,
-    [user.id, thrillUsername, Date.now()]
+    `INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (discord_user_id) DO UPDATE SET thrill_username = EXCLUDED.thrill_username, updated_at = EXCLUDED.updated_at`,
+    [targetUser.id, thrillUsername, Date.now()]
   );
 
   await interaction.reply({
-    content: `✅ Linked <@${user.id}> to **${thrillUsername}**`,
+    content: `✅ Linked <@${targetUser.id}> to **${thrillUsername}**`,
     flags: 64,
   });
 }
 
 async function handleMapEdit(interaction) {
-  const user = interaction.options.getUser('user');
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  const targetUser = interaction.options.getUser('user');
   const newThrillUsername = interaction.options.getString('new_thrill_username');
 
+  // Check permissions
+  const isAdmin = isAdminOrBot(member);
+  const isVerif = isVerified(member);
+
+  if (!isAdmin && !isVerif) {
+    return await interaction.reply({
+      content: '❌ You need the Verified role or higher to use this command.',
+      flags: 64,
+    });
+  }
+
+  // If Verified role, can only edit themselves
+  if (isVerif && !isAdmin) {
+    if (targetUser.id !== interaction.user.id) {
+      return await interaction.reply({
+        content: '❌ You can only edit your own mapping. Admins can edit any user.',
+        flags: 64,
+      });
+    }
+  }
+
   const existing = await dbGet(
-    'SELECT * FROM user_map WHERE discord_user_id = ?',
-    [user.id]
+    'SELECT * FROM user_map WHERE discord_user_id = $1',
+    [targetUser.id]
   );
 
   if (!existing) {
     return await interaction.reply({
-      content: `❌ No mapping found for <@${user.id}>. Use \`/t link\` first.`,
+      content: `❌ No mapping found for <@${targetUser.id}>. Use \`/t link\` first.`,
       flags: 64,
     });
   }
 
   await dbRun(
-    `UPDATE user_map SET thrill_username = ?, updated_at = ? WHERE discord_user_id = ?`,
-    [newThrillUsername, Date.now(), user.id]
+    `UPDATE user_map SET thrill_username = $1, updated_at = $2 WHERE discord_user_id = $3`,
+    [newThrillUsername, Date.now(), targetUser.id]
   );
 
   await interaction.reply({
-    content: `✅ Updated <@${user.id}> mapping from **${existing.thrill_username}** to **${newThrillUsername}**`,
+    content: `✅ Updated <@${targetUser.id}> mapping from **${existing.thrill_username}** to **${newThrillUsername}**`,
     flags: 64,
   });
 }
 
 async function handleMapDelete(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
   const user = interaction.options.getUser('user');
 
+  // Check permissions - only Admin or Giveaway Managers
+  if (!isAdminOrBot(member)) {
+    return await interaction.reply({
+      content: '❌ You need Admin or Giveaway Managers role to use this command.',
+      flags: 64,
+    });
+  }
+
   const existing = await dbGet(
-    'SELECT * FROM user_map WHERE discord_user_id = ?',
+    'SELECT * FROM user_map WHERE discord_user_id = $1',
     [user.id]
   );
 
@@ -514,7 +762,7 @@ async function handleMapDelete(interaction) {
     });
   }
 
-  await dbRun('DELETE FROM user_map WHERE discord_user_id = ?', [user.id]);
+  await dbRun('DELETE FROM user_map WHERE discord_user_id = $1', [user.id]);
 
   await interaction.reply({
     content: `✅ Deleted mapping for <@${user.id}> (**${existing.thrill_username}**)`,
@@ -523,6 +771,16 @@ async function handleMapDelete(interaction) {
 }
 
 async function handleMapList(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+
+  // Check permissions - only Admin or Giveaway Managers
+  if (!isAdminOrBot(member)) {
+    return await interaction.reply({
+      content: '❌ You need Admin or Giveaway Managers role to use this command.',
+      flags: 64,
+    });
+  }
+
   const mappings = await dbAll('SELECT * FROM user_map ORDER BY updated_at DESC');
 
   if (mappings.length === 0) {
@@ -532,22 +790,63 @@ async function handleMapList(interaction) {
     });
   }
 
-  let list = '**User Mappings:**\n';
-  for (const m of mappings) {
-    list += `• <@${m.discord_user_id}> → **${m.thrill_username}**\n`;
-  }
+  // Pagination: 20 mappings per page
+  const mappingsPerPage = 20;
+  const totalPages = Math.ceil(mappings.length / mappingsPerPage);
+
+  // Create pagination object
+  const paginationId = `t_list_${interaction.user.id}_${Date.now()}`;
+  pagination[paginationId] = {
+    mappings,
+    currentPage: 0,
+    totalPages,
+    mappingsPerPage,
+    guildId: interaction.guildId,
+  };
+
+  // Create first page
+  const content = createMapListContent(mappings, 0, mappingsPerPage, totalPages);
+
+  // Create navigation buttons
+  const buttons = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`t_list_prev_${paginationId}`)
+        .setLabel('← Previous')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId(`t_list_next_${paginationId}`)
+        .setLabel('Next →')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(totalPages <= 1),
+      new ButtonBuilder()
+        .setCustomId(`t_list_close_${paginationId}`)
+        .setLabel('Close')
+        .setStyle(ButtonStyle.Danger)
+    );
 
   await interaction.reply({
-    content: list,
+    content,
+    components: totalPages > 1 ? [buttons] : [],
     flags: 64,
   });
 }
 
 async function handleMapLookup(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
   const user = interaction.options.getUser('user');
 
+  // Check permissions - Verified role or higher
+  if (!isVerified(member) && !isAdminOrBot(member)) {
+    return await interaction.reply({
+      content: '❌ You need the Verified role or higher to use this command.',
+      flags: 64,
+    });
+  }
+
   const mapping = await dbGet(
-    'SELECT * FROM user_map WHERE discord_user_id = ?',
+    'SELECT * FROM user_map WHERE discord_user_id = $1',
     [user.id]
   );
 
@@ -576,9 +875,9 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
 
   const memberInput = new TextInputBuilder()
     .setCustomId('gw_member')
-    .setLabel('Member to feature')
+    .setLabel('Requested by')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('e.g., "donic" (or leave blank)')
+    .setPlaceholder('Username requesting this giveaway. Example: Donic')
     .setRequired(false)
     .setValue(previousValues.member || '');
 
@@ -586,6 +885,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_amount')
     .setLabel('Amount')
     .setStyle(TextInputStyle.Short)
+    .setPlaceholder('Whole number only. Example: 50')
     .setRequired(false)
     .setValue(previousValues.amount || '');
 
@@ -593,7 +893,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_min_xp')
     .setLabel('Minimum XP in thousands')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('0')
+    .setPlaceholder('Whole number in thousands. Example: 10 means 10k XP')
     .setRequired(false)
     .setValue(previousValues.minXp || '');
 
@@ -601,7 +901,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_other_req')
     .setLabel('Other Requirements (optional)')
     .setStyle(TextInputStyle.Paragraph)
-    .setPlaceholder('e.g., "Must have voted"')
+    .setPlaceholder('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
     .setRequired(false)
     .setValue(previousValues.otherReq || '');
 
@@ -649,11 +949,11 @@ async function handleGiveawayStartModal(interaction) {
   }
 
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
 
-  if (giveaway && giveaway.is_active) {
+  if (giveaway) {
     return await interaction.editReply({
       content: '⚠️ A giveaway is already active.',
     });
@@ -661,7 +961,7 @@ async function handleGiveawayStartModal(interaction) {
 
   // Load server defaults
   const settings = await dbGet(
-    'SELECT * FROM server_settings WHERE guild_id = ?',
+    'SELECT * FROM server_settings WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -671,14 +971,13 @@ async function handleGiveawayStartModal(interaction) {
 
   if (templateName) {
     templateData = await dbGet(
-      'SELECT * FROM templates WHERE guild_id = ? AND name = ?',
+      'SELECT * FROM templates WHERE guild_id = $1 AND name = $2',
       [interaction.guildId, templateName]
     );
 
     if (!templateData) {
-      return await interaction.reply({
+      return await interaction.editReply({
         content: `❌ Template "${templateName}" not found.`,
-        flags: 64,
       });
     }
   }
@@ -688,7 +987,7 @@ const selections = {
     duration: String(templateData?.duration || settings?.default_duration || '2'),
     currency: templateData?.currency || settings?.default_currency || 'CAD',
     winners: String(templateData?.num_winners || settings?.default_winners || '1'),
-    autoCheck: templateData ? (templateData.auto_check === 1 ? true : false) : (settings?.default_autocheck === 1 ? true : settings?.default_autocheck === 0 ? false : true),
+    autoCheck: templateData ? (templateData.auto_check === 1 ? true : false) : (settings?.default_autocheck === 1 ? true : settings?.default_autocheck === 0 ? false : false),
   };
 
   // Store template data for Step 2 preloading
@@ -741,7 +1040,7 @@ const updateEmbed = () => {
       .setCustomId('gw_winners_select')
       .setPlaceholder('Number of Winners')
       .addOptions(
-        Array.from({ length: 10 }, (_, idx) => ({
+        Array.from({ length: 6 }, (_, idx) => ({
           label: idx + 1 === 1 ? '1 winner' : `${idx + 1} winners`,
           value: String(idx + 1),
           default: String(idx + 1) === selections.winners,
@@ -805,7 +1104,7 @@ const updateEmbed = () => {
     } else if (i.customId === 'gw_load_template') {
       // Show template list in a separate message
       const templates = await dbAll(
-        'SELECT * FROM templates WHERE guild_id = ? ORDER BY name',
+        'SELECT * FROM templates WHERE guild_id = $1 ORDER BY name',
         [interaction.guildId]
       );
 
@@ -840,7 +1139,7 @@ const updateEmbed = () => {
       // Load template values into selections
       const templateId = i.values[0];
       const template = await dbGet(
-        'SELECT * FROM templates WHERE template_id = ?',
+        'SELECT * FROM templates WHERE template_id = $1',
         [templateId]
       );
 
@@ -926,11 +1225,11 @@ const updateEmbed = () => {
 // Quick start - skips Step 1 and shows Step 2 with default selections
 async function handleGiveawayQuickStart(interaction) {
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
 
-  if (giveaway && giveaway.is_active) {
+  if (giveaway) {
     return await interaction.reply({
       content: '⚠️ A giveaway is already active.',
       flags: 64,
@@ -945,7 +1244,7 @@ async function handleGiveawayQuickStart(interaction) {
 
     // Load template
     const template = await dbGet(
-      'SELECT * FROM templates WHERE guild_id = ? AND name = ?',
+      'SELECT * FROM templates WHERE guild_id = $1 AND name = $2',
       [interaction.guildId, templateName]
     );
 
@@ -994,15 +1293,23 @@ async function handleGiveawayQuickStart(interaction) {
     // Build requirements text
     let reqText = '';
     if (minXp > 0) {
-      reqText += `• ${minXp}k XP`;
+      reqText += `• Minimum ${minXp}k XP wagered`;
     }
     if (otherReq) {
-      const reqLines = otherReq.split('\n').filter(line => line.trim());
+      const reqLines = otherReq.split('\n');
       if (reqLines.length > 0) {
         if (reqText) {
           reqText += '\n';
         }
-        reqText += reqLines.map(line => `• ${line}`).join('\n');
+        reqText += reqLines.map(line => {
+          if (!line.trim()) {
+            return '';
+          }
+          if (line.trim().startsWith('|')) {
+            return line.trim().substring(1);
+          }
+          return `• ${line}`;
+        }).join('\n');
       }
     }
 
@@ -1050,13 +1357,46 @@ embed.addFields(
 
     const message = await channel.send({ embeds: [embed], components: [row] });
 
-    // Insert into database
-    await dbRun('DELETE FROM active_giveaway WHERE guild_id = ?', [interaction.guildId]);
+    // Save current giveaway to history before deleting
+    const existingGiveaway = await dbGet(
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
+      [interaction.guildId]
+    );
+    
+    if (existingGiveaway) {
+      await dbRun(
+        `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+        [
+          existingGiveaway.guild_id,
+          existingGiveaway.channel_id,
+          existingGiveaway.message_id,
+          existingGiveaway.giveaway_type,
+          existingGiveaway.min_xp,
+          existingGiveaway.additional_requirements,
+          existingGiveaway.amount,
+          existingGiveaway.currency,
+          existingGiveaway.auto_check,
+          existingGiveaway.hosted_by,
+          existingGiveaway.with_member,
+          existingGiveaway.num_winners,
+          existingGiveaway.eligible_entrants,
+          existingGiveaway.ineligible_entrants,
+          existingGiveaway.initial_winners,
+          existingGiveaway.started_at,
+          existingGiveaway.duration_minutes,
+          existingGiveaway.ends_at,
+        ]
+      );
+    }
+
+    // Delete the old active giveaway
+    await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [interaction.guildId]);
 
     await dbRun(
       `INSERT INTO active_giveaway 
-       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
       [
         interaction.guildId,
         channel.id,
@@ -1076,7 +1416,6 @@ embed.addFields(
         Date.now(),
         duration,
         endTime,
-        1,
       ]
     );
 
@@ -1094,7 +1433,7 @@ embed.addFields(
 
   // Load server defaults
   const settings = await dbGet(
-    'SELECT * FROM server_settings WHERE guild_id = ?',
+    'SELECT * FROM server_settings WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1104,7 +1443,7 @@ embed.addFields(
     duration: String(settings?.default_duration || '2'),
     currency: settings?.default_currency || 'CAD',
     winners: String(settings?.default_winners || '1'),
-    autoCheck: settings?.default_autocheck === 1 ? true : settings?.default_autocheck === 0 ? false : true,
+    autoCheck: settings?.default_autocheck === 1 ? true : settings?.default_autocheck === 0 ? false : false,
   };
 
   // Store the interaction for later cleanup (just like Step 1)
@@ -1120,29 +1459,30 @@ embed.addFields(
 
   const memberInput = new TextInputBuilder()
     .setCustomId('gw_member')
-    .setLabel('Member to feature')
+    .setLabel('Requested by')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('e.g., "donic" (or leave blank)')
+    .setPlaceholder('Username requesting this giveaway. Example: Donic')
     .setRequired(false);
 
   const amountInput = new TextInputBuilder()
     .setCustomId('gw_amount')
     .setLabel('Amount')
     .setStyle(TextInputStyle.Short)
+    .setPlaceholder('Whole number only. Example: 50')
     .setRequired(false);
 
   const minXpInput = new TextInputBuilder()
     .setCustomId('gw_min_xp')
-    .setLabel('Minimum XP *in thousands*')
+    .setLabel('Minimum XP in thousands')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('0')
+    .setPlaceholder('Whole number in thousands. Example: 10 means 10k XP')
     .setRequired(false);
 
   const otherReqInput = new TextInputBuilder()
     .setCustomId('gw_other_req')
     .setLabel('Other Requirements (optional)')
     .setStyle(TextInputStyle.Paragraph)
-    .setPlaceholder('e.g., "Must have voted"')
+    .setPlaceholder('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
     .setRequired(false);
 
   modal.addComponents(
@@ -1160,11 +1500,11 @@ async function handleGiveawayEnd(interaction) {
   await interaction.deferReply({ flags: 64 });
   
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
 
-  if (!giveaway || !giveaway.is_active) {
+  if (!giveaway) {
     return await interaction.editReply({
       content: '❌ No active giveaway.',
     });
@@ -1175,7 +1515,33 @@ async function handleGiveawayEnd(interaction) {
   const message = await channel.messages.fetch(giveaway.message_id);
 
   if (eligible.length === 0) {
-    await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = ?', [
+    // Save to history before deleting
+    await dbRun(
+      `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+      [
+        giveaway.guild_id,
+        giveaway.channel_id,
+        giveaway.message_id,
+        giveaway.giveaway_type,
+        giveaway.min_xp,
+        giveaway.additional_requirements,
+        giveaway.amount,
+        giveaway.currency,
+        giveaway.auto_check,
+        giveaway.hosted_by,
+        giveaway.with_member,
+        giveaway.num_winners,
+        giveaway.eligible_entrants,
+        giveaway.ineligible_entrants,
+        giveaway.initial_winners,
+        giveaway.started_at,
+        giveaway.duration_minutes,
+        giveaway.ends_at,
+      ]
+    );
+
+    await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [
       interaction.guildId,
     ]);
     
@@ -1231,7 +1597,7 @@ async function handleGiveawayEnd(interaction) {
     });
   }
 
-  const winnerIds = selectWinners(eligible, giveaway.num_winners);
+  const winnerIds = await selectWinners(eligible, giveaway.num_winners, interaction.guildId);
   
   // Stop the update loop before editing
   if (updateLoops.has(interaction.guildId)) {
@@ -1239,7 +1605,7 @@ async function handleGiveawayEnd(interaction) {
     updateLoops.delete(interaction.guildId);
   }
 
-  await dbRun('UPDATE active_giveaway SET initial_winners = ? WHERE guild_id = ?', [
+  await dbRun('UPDATE active_giveaway SET initial_winners = $1 WHERE guild_id = $2', [
     JSON.stringify(winnerIds),
     interaction.guildId,
   ]);
@@ -1249,32 +1615,19 @@ async function handleGiveawayEnd(interaction) {
 
   for (const winnerId of winnerIds) {
     const userMap = await dbGet(
-      'SELECT thrill_username FROM user_map WHERE discord_user_id = ?',
+      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
       [winnerId]
     );
 
-    let winnerText = `<@${winnerId}>`;
-
-    if (giveaway.auto_check && userMap) {
-      const eligibility = await checkEligibility(
-        userMap.thrill_username,
-        giveaway.min_xp
-      );
-
-      if (eligibility.requiresManualCheck) {
-        winnerText += ` (Please comment *fresh* screenshots of **code Donic + XP**)`;
-      } else if (eligibility.blocked) {
-        winnerText += ` ⚠️ **Ineligible**: ${eligibility.reason}`;
-      } else {
-        winnerText += ` ⭐ XP: ${formatXP(eligibility.xp)}`;
-      }
-    } else if (!giveaway.auto_check) {
-      winnerText += ` (Please comment *fresh* screenshots of **code Donic + XP**)`;
-    }
+    const thrillUsername = userMap?.thrill_username || 'Not linked';
+    let winnerText = `<@${winnerId}> -- Thrill: ${thrillUsername}`;
 
     winnerListText += winnerText + '\n';
     announcement += winnerText + '\n';
   }
+
+  winnerListText += '\n*(Please comment fresh screenshots of code Donic + XP)*';
+  announcement += '\n*(Please comment fresh screenshots of code Donic + XP)*';
 
   // Edit the original message with winners
   try {
@@ -1317,7 +1670,41 @@ async function handleGiveawayEnd(interaction) {
     console.error(`❌ Failed to send announcement:`, err.message);
   }
 
-  await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = ?', [
+  // Fetch updated giveaway with initial_winners before archiving
+  const updatedGiveaway = await dbGet(
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
+    [interaction.guildId]
+  );
+  
+  if (updatedGiveaway) {
+    // Save to history before deleting
+    await dbRun(
+      `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+      [
+        updatedGiveaway.guild_id,
+        updatedGiveaway.channel_id,
+        updatedGiveaway.message_id,
+        updatedGiveaway.giveaway_type,
+        updatedGiveaway.min_xp,
+        updatedGiveaway.additional_requirements,
+        updatedGiveaway.amount,
+        updatedGiveaway.currency,
+        updatedGiveaway.auto_check,
+        updatedGiveaway.hosted_by,
+        updatedGiveaway.with_member,
+        updatedGiveaway.num_winners,
+        updatedGiveaway.eligible_entrants,
+        updatedGiveaway.ineligible_entrants,
+        updatedGiveaway.initial_winners,
+        updatedGiveaway.started_at,
+        updatedGiveaway.duration_minutes,
+        updatedGiveaway.ends_at,
+      ]
+    );
+  }
+
+  await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [
     interaction.guildId,
   ]);
 
@@ -1328,18 +1715,44 @@ async function handleGiveawayEnd(interaction) {
 
 async function handleGiveawayCancel(interaction) {
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
 
-  if (!giveaway || !giveaway.is_active) {
+  if (!giveaway) {
     return await interaction.reply({
       content: '❌ No active giveaway.',
       flags: 64,
     });
   }
 
-  await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = ?', [
+  // Save to history before deleting
+  await dbRun(
+    `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+    [
+      giveaway.guild_id,
+      giveaway.channel_id,
+      giveaway.message_id,
+      giveaway.giveaway_type,
+      giveaway.min_xp,
+      giveaway.additional_requirements,
+      giveaway.amount,
+      giveaway.currency,
+      giveaway.auto_check,
+      giveaway.hosted_by,
+      giveaway.with_member,
+      giveaway.num_winners,
+      giveaway.eligible_entrants,
+      giveaway.ineligible_entrants,
+      giveaway.initial_winners,
+      giveaway.started_at,
+      giveaway.duration_minutes,
+      giveaway.ends_at,
+    ]
+  );
+
+  await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [
     interaction.guildId,
   ]);
 
@@ -1350,10 +1763,18 @@ async function handleGiveawayCancel(interaction) {
 }
 
 async function handleGiveawayReroll(interaction) {
-  const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+  let giveaway = await dbGet(
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
   );
+
+  // If no active giveaway, check history (most recent one)
+  if (!giveaway) {
+    giveaway = await dbGet(
+      'SELECT * FROM giveaway_history WHERE guild_id = $1 ORDER BY id DESC LIMIT 1',
+      [interaction.guildId]
+    );
+  }
 
   if (!giveaway) {
     return await interaction.reply({
@@ -1374,20 +1795,532 @@ async function handleGiveawayReroll(interaction) {
     });
   }
 
-  const winnerIds = selectWinners(availableForReroll, giveaway.num_winners);
+  // Get how_many option from command (default to all winners if not provided)
+  const howMany = interaction.options.getInteger('how_many') || giveaway.num_winners;
+
+  // Validate howMany doesn't exceed available entrants
+  const numToReroll = Math.min(howMany, availableForReroll.length);
+
+  const winnerIds = await selectWinners(availableForReroll, numToReroll, interaction.guildId);
   const channel = await client.channels.fetch(giveaway.channel_id);
 
-  let announcement = '🎰 **Reroll Winners:**\n\n';
+  let announcement = `🎰 **Reroll Winners** (${numToReroll} of ${giveaway.num_winners}):\n\n`;
   for (const winnerId of winnerIds) {
-    announcement += `<@${winnerId}>\n`;
+    const userMap = await dbGet(
+      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
+      [winnerId]
+    );
+    const thrillUsername = userMap?.thrill_username || 'Not linked';
+    announcement += `<@${winnerId}> -- Thrill: ${thrillUsername}\n`;
   }
+  announcement += '\n*(Please comment fresh screenshots of code Donic + XP)*';
 
   await channel.send(announcement);
 
   await interaction.reply({
-    content: `✅ Reroll complete (initial winners excluded).`,
+    content: `✅ Reroll complete - ${numToReroll} winner${numToReroll !== 1 ? 's' : ''} selected (initial winners excluded).`,
     flags: 64,
   });
+}
+
+async function handleGiveawayRunback(interaction) {
+  await interaction.deferReply({ flags: 64 });
+
+  // Get the most recent COMPLETED giveaway for this guild
+  const lastGiveaway = await dbGet(
+    'SELECT * FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC LIMIT 1',
+    [interaction.guildId]
+  );
+
+  if (!lastGiveaway) {
+    return await interaction.editReply({
+      content: '❌ No previous giveaways found in this server.',
+    });
+  }
+
+  // Store the values for Step 1 display
+  const step1Data = {
+    type: lastGiveaway.giveaway_type,
+    duration: lastGiveaway.duration_minutes,
+    currency: lastGiveaway.currency,
+    numWinners: lastGiveaway.num_winners,
+    autoCheck: lastGiveaway.auto_check === 1 ? true : false,
+    minXp: lastGiveaway.min_xp,
+    amount: lastGiveaway.amount,
+    withMember: lastGiveaway.with_member,
+    otherReq: lastGiveaway.additional_requirements,
+  };
+
+  // Show Step 1 confirmation
+  const summaryLines = [];
+  summaryLines.push(`**Type:** ${step1Data.type}`);
+  summaryLines.push(`**Duration:** ${step1Data.duration} minute${step1Data.duration > 1 ? 's' : ''}`);
+  summaryLines.push(`**Winners:** ${step1Data.numWinners}`);
+  summaryLines.push(`**Currency:** ${step1Data.currency}`);
+  summaryLines.push(`**Auto-check:** ${step1Data.autoCheck ? '✅' : '❌'}`);
+
+  if (step1Data.minXp > 0) summaryLines.push(`**Min XP:** ${step1Data.minXp}k`);
+  if (step1Data.amount) summaryLines.push(`**Amount:** ${formatAmount(step1Data.amount)}`);
+  if (step1Data.withMember) summaryLines.push(`**Featured Member:** ${step1Data.withMember}`);
+  if (step1Data.otherReq) {
+    summaryLines.push(`**Requirements:**\n${step1Data.otherReq}`);
+  }
+
+  const runbackId = Date.now();
+  const confirmButton = new ButtonBuilder()
+    .setCustomId(`gw_runback_confirm_${runbackId}`)
+    .setLabel('✅ Run this giveaway')
+    .setStyle(ButtonStyle.Success);
+
+  const cancelButton = new ButtonBuilder()
+    .setCustomId(`gw_runback_cancel_${runbackId}`)
+    .setLabel('❌ Cancel')
+    .setStyle(ButtonStyle.Danger);
+
+  const embed = getBrandEmbed('Runback Confirmation')
+    .setDescription('Using the exact same settings as the last giveaway:\n\n' + summaryLines.join('\n'));
+
+  const customId = `runback_${runbackId}`;
+  templateCreationData.set(customId, step1Data);
+
+  await interaction.editReply({
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder().addComponents(confirmButton, cancelButton),
+    ],
+  });
+
+  // Store interaction for later dismissal when button is clicked
+  runbackConfirmInteractions.set(runbackId, interaction);
+
+  // Handle button interactions
+  const filter = i => i.user.id === interaction.user.id && i.customId.includes(`gw_runback`) && i.customId.includes(String(runbackId));
+  const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000 });
+
+  collector.on('collect', async (i) => {
+    if (i.customId === `gw_runback_confirm_${runbackId}`) {
+      // Dismiss the confirmation message using stored interaction
+      const storedInteraction = runbackConfirmInteractions.get(runbackId);
+      if (storedInteraction) {
+        try {
+          await storedInteraction.deleteReply();
+          runbackConfirmInteractions.delete(runbackId);
+          console.log(`✅ Dismissed runback confirmation`);
+        } catch (err) {
+          console.error(`⚠️ Could not dismiss runback confirmation:`, err.message);
+        }
+      }
+      
+      // Continue processing in the background
+
+      // Calculate end time
+      const endTime = Date.now() + step1Data.duration * 60000;
+
+      // Store the new giveaway values
+      const newGiveaway = {
+        guild_id: interaction.guildId,
+        channel_id: interaction.channelId,
+        giveaway_type: step1Data.type,
+        min_xp: step1Data.minXp,
+        amount: step1Data.amount,
+        currency: step1Data.currency,
+        with_member: step1Data.withMember,
+        additional_requirements: step1Data.otherReq,
+        num_winners: step1Data.numWinners,
+        auto_check: step1Data.autoCheck ? 1 : 0,
+        hosted_by: interaction.user.id,
+        started_at: Date.now(),
+        ends_at: endTime,
+        duration_minutes: step1Data.duration,
+      };
+
+      // Save current giveaway to history before deleting
+      const existingGiveaway = await dbGet(
+        'SELECT * FROM active_giveaway WHERE guild_id = $1',
+        [interaction.guildId]
+      );
+      
+      if (existingGiveaway) {
+        await dbRun(
+          `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+          [
+            existingGiveaway.guild_id,
+            existingGiveaway.channel_id,
+            existingGiveaway.message_id,
+            existingGiveaway.giveaway_type,
+            existingGiveaway.min_xp,
+            existingGiveaway.additional_requirements,
+            existingGiveaway.amount,
+            existingGiveaway.currency,
+            existingGiveaway.auto_check,
+            existingGiveaway.hosted_by,
+            existingGiveaway.with_member,
+            existingGiveaway.num_winners,
+            existingGiveaway.eligible_entrants,
+            existingGiveaway.ineligible_entrants,
+            existingGiveaway.initial_winners,
+            existingGiveaway.started_at,
+            existingGiveaway.duration_minutes,
+            existingGiveaway.ends_at,
+          ]
+        );
+      }
+
+      // Delete the old active giveaway
+      await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [interaction.guildId]);
+
+      // Create the giveaway message
+      let title = `GIVEAWAY:`;
+      if (step1Data.type !== 'Custom') {
+        if (step1Data.amount !== null && step1Data.amount !== undefined) {
+          title += ` ${formatAmount(step1Data.amount)} ${step1Data.currency}`;
+        }
+        title += ` ${step1Data.type}`;
+        if (step1Data.withMember) {
+          title += ` with ${step1Data.withMember}!`;
+        } else {
+          title += '!';
+        }
+      } else {
+        if (step1Data.withMember) {
+          title += ` with ${step1Data.withMember}!`;
+        }
+      }
+
+      const giveawayEmbed = getBrandEmbed(title);
+
+      // Build requirements text
+      let reqText = '';
+      if (step1Data.minXp > 0) {
+        reqText += `• Minimum ${step1Data.minXp}k XP wagered`;
+      }
+      if (step1Data.otherReq) {
+        const reqLines = step1Data.otherReq.split('\n');
+        if (reqLines.length > 0) {
+          if (reqText) {
+            reqText += '\n';
+          }
+          reqText += reqLines.map(line => {
+            if (!line.trim()) {
+              return '';
+            }
+            if (line.trim().startsWith('|')) {
+              return line.trim().substring(1);
+            }
+            return `• ${line}`;
+          }).join('\n');
+        }
+      }
+
+      if (!reqText) {
+        reqText = 'None';
+      }
+
+      const discordTimestamp = formatDiscordTimestamp(endTime);
+
+      const descParts = [
+        '═════════════════════════\n⚠️ **MUST BE UNDER CODE *DONIC*** ⚠️\n═════════════════════════',
+        `Hosted by: <@${interaction.user.id}>\n`,
+        `Winners: ${step1Data.numWinners}`,
+        `Entries: 0`
+      ];
+      
+      if (step1Data.autoCheck) {
+        descParts.push(`Ineligible: 0\n─────────────────────────`);
+      } else {
+        descParts.push(`─────────────────────────`);
+      }
+
+      giveawayEmbed.setDescription(descParts.join('\n'));
+      giveawayEmbed.addFields({ name: 'DETAILS:', value: reqText, inline: false });
+      giveawayEmbed.addFields({ name: '\u200b', value: '\u200b', inline: false });
+      giveawayEmbed.addFields({ name: '🕐 Ends in:', value: `${discordTimestamp}`, inline: false });
+
+      const enterButton = new ButtonBuilder()
+        .setCustomId('enter_giveaway')
+        .setLabel('Enter Giveaway')
+        .setStyle(ButtonStyle.Primary);
+
+      const giveawayMessage = await interaction.channel.send({
+        embeds: [giveawayEmbed],
+        components: [new ActionRowBuilder().addComponents(enterButton)],
+      });
+
+      // Store in database
+      await dbRun(
+        `INSERT INTO active_giveaway (guild_id, channel_id, message_id, giveaway_type, min_xp, amount, currency, with_member, additional_requirements, num_winners, auto_check, hosted_by, started_at, ends_at, duration_minutes, eligible_entrants, ineligible_entrants, initial_winners)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, '[]', '[]', '[]')`,
+        [
+          interaction.guildId,
+          interaction.channelId,
+          giveawayMessage.id,
+          newGiveaway.giveaway_type,
+          newGiveaway.min_xp,
+          newGiveaway.amount,
+          newGiveaway.currency,
+          newGiveaway.with_member,
+          newGiveaway.additional_requirements,
+          newGiveaway.num_winners,
+          newGiveaway.auto_check,
+          newGiveaway.hosted_by,
+          newGiveaway.started_at,
+          newGiveaway.ends_at,
+          newGiveaway.duration_minutes,
+        ]
+      );
+
+      // Start update loop and timer
+      startGiveawayUpdateLoop(interaction.guildId);
+      startAutoEndTimer(interaction.guildId, endTime);
+    } else if (i.customId === `gw_runback_cancel_${runbackId}`) {
+      // Dismiss the confirmation message using stored interaction
+      const storedInteraction = runbackConfirmInteractions.get(runbackId);
+      if (storedInteraction) {
+        try {
+          await storedInteraction.deleteReply();
+          runbackConfirmInteractions.delete(runbackId);
+          console.log(`✅ Dismissed runback confirmation (cancel)`);
+        } catch (err) {
+          console.error(`⚠️ Could not dismiss runback confirmation:`, err.message);
+        }
+      }
+    }
+  });
+}
+
+// ============================================================================
+// HANDLE: /gw count - Show giveaway win counts
+// ============================================================================
+async function handleGiveawayCount(interaction) {
+  await interaction.deferReply({ flags: 64 });
+
+  // Get all giveaway history for this server
+  const allGiveaways = await dbAll(
+    'SELECT initial_winners, eligible_entrants FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC',
+    [interaction.guildId]
+  );
+
+  if (allGiveaways.length === 0) {
+    return await interaction.editReply({
+      content: '❌ No giveaways have been run yet.',
+    });
+  }
+
+  // Count wins and entries for each user
+  const userStats = {}; // { userId: { wins: 0, entries: 0 } }
+
+  for (const giveaway of allGiveaways) {
+    // Count entries (eligible entrants)
+    if (giveaway.eligible_entrants) {
+      try {
+        const entries = JSON.parse(giveaway.eligible_entrants);
+        for (const entrantId of entries) {
+          if (!userStats[entrantId]) {
+            userStats[entrantId] = { wins: 0, entries: 0 };
+          }
+          userStats[entrantId].entries += 1;
+        }
+      } catch (err) {
+        console.error('Failed to parse eligible_entrants:', err);
+      }
+    }
+
+    // Count wins
+    if (giveaway.initial_winners) {
+      try {
+        const winners = JSON.parse(giveaway.initial_winners);
+        for (const winnerId of winners) {
+          if (!userStats[winnerId]) {
+            userStats[winnerId] = { wins: 0, entries: 0 };
+          }
+          userStats[winnerId].wins += 1;
+        }
+      } catch (err) {
+        console.error('Failed to parse winners:', err);
+      }
+    }
+  }
+
+  if (Object.keys(userStats).length === 0) {
+    return await interaction.editReply({
+      content: '❌ No entries or winners recorded yet.',
+    });
+  }
+
+  // Sort by win count (descending)
+  const sortedUsers = Object.entries(userStats)
+    .sort(([, a], [, b]) => b.wins - a.wins);
+
+  // Get usernames
+  const guild = interaction.guild;
+  const userList = [];
+  
+  for (const [userId, stats] of sortedUsers) {
+    // Include everyone who has entries, even with 0 wins
+    const winPercentage = stats.entries > 0 
+      ? ((stats.wins / stats.entries) * 100).toFixed(1)
+      : '0.0';
+    
+    let username = `<Unknown User ${userId}>`;
+    try {
+      const member = await guild.members.fetch(userId);
+      username = member.user.username;
+    } catch (err) {
+      // Use default
+    }
+    
+    userList.push({
+      username,
+      wins: stats.wins,
+      entries: stats.entries,
+      percentage: winPercentage,
+    });
+  }
+
+  // Pagination: 15 users per page
+  const usersPerPage = 15;
+  const totalPages = Math.ceil(userList.length / usersPerPage);
+
+  // Create pagination object
+  const paginationId = `gw_count_${interaction.user.id}_${Date.now()}`;
+  pagination[paginationId] = {
+    userList,
+    currentPage: 0,
+    totalPages,
+    usersPerPage,
+    guildId: interaction.guildId,
+  };
+
+  // Create first page embed
+  const embed = createCountEmbed(userList, 0, usersPerPage, totalPages);
+  
+  // Create navigation buttons
+  const buttons = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`gw_count_prev_${paginationId}`)
+        .setLabel('← Previous')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId(`gw_count_next_${paginationId}`)
+        .setLabel('Next →')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(totalPages <= 1),
+      new ButtonBuilder()
+        .setCustomId(`gw_count_close_${paginationId}`)
+        .setLabel('Close')
+        .setStyle(ButtonStyle.Danger)
+    );
+
+  await interaction.editReply({
+    embeds: [embed],
+    components: [buttons],
+  });
+}
+
+async function handleGiveawayEntrants(interaction) {
+  await interaction.deferReply({ flags: 64 }); // Ephemeral reply
+
+  // Get the most recent completed giveaway
+  const recentGiveaway = await dbGet(
+    'SELECT eligible_entrants FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC LIMIT 1',
+    [interaction.guildId]
+  );
+
+  if (!recentGiveaway || !recentGiveaway.eligible_entrants) {
+    return await interaction.editReply({
+      content: '❌ No giveaways have been completed yet.',
+    });
+  }
+
+  let entrantIds = [];
+  try {
+    entrantIds = JSON.parse(recentGiveaway.eligible_entrants);
+  } catch (err) {
+    console.error('Failed to parse eligible_entrants:', err);
+    return await interaction.editReply({
+      content: '❌ Error retrieving eligible entrants.',
+    });
+  }
+
+  if (entrantIds.length === 0) {
+    return await interaction.editReply({
+      content: '❌ The most recent giveaway had no eligible entrants.',
+    });
+  }
+
+  // Convert user IDs to Discord display names
+  const guild = interaction.guild;
+  const entrantList = [];
+
+  for (const userId of entrantIds) {
+    try {
+      const member = await guild.members.fetch(userId);
+      entrantList.push(member.displayName);
+    } catch (err) {
+      // If user can't be fetched, use the ID
+      entrantList.push(`<Unknown User ${userId}>`);
+    }
+  }
+
+  // Sort alphabetically for readability
+  entrantList.sort();
+
+  // Create formatted list
+  let entrantsText = entrantList.map((name, idx) => `${idx + 1}. ${name}`).join('\n');
+
+  // Break into chunks if too long (Discord message limit)
+  const maxChars = 2000;
+  let message = `✅ **Eligible Entrants** (${entrantList.length} total)\n\n${entrantsText}`;
+
+  if (message.length > maxChars) {
+    // Create multiple messages if needed
+    entrantsText = entrantList.join('\n');
+    message = `✅ **Eligible Entrants** (${entrantList.length} total)\n\n${entrantsText}`;
+  }
+
+  await interaction.editReply({
+    content: message,
+  });
+}
+
+function createCountEmbed(userList, page, usersPerPage, totalPages) {
+  const start = page * usersPerPage;
+  const end = Math.min(start + usersPerPage, userList.length);
+  const pageUsers = userList.slice(start, end);
+
+  let description = '';
+  for (let i = 0; i < pageUsers.length; i++) {
+    const user = pageUsers[i];
+    const rank = start + i + 1;
+    description += `**${rank}.** ${user.username}\n`;
+    description += `${user.wins} win${user.wins !== 1 ? 's' : ''}, ${user.entries} entr${user.entries !== 1 ? 'ies' : 'y'} (${user.percentage}%)\n\n`;
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle('🏆 Giveaway Win Leaderboard')
+    .setDescription(description)
+    .setColor('#FFD700')
+    .setFooter({ text: `Page ${page + 1} of ${totalPages} • Total players: ${userList.length}` });
+
+  return embed;
+}
+
+function createMapListContent(mappings, page, mappingsPerPage, totalPages) {
+  const start = page * mappingsPerPage;
+  const end = Math.min(start + mappingsPerPage, mappings.length);
+  const pageMappings = mappings.slice(start, end);
+
+  let content = '**User Mappings:**\n';
+  for (const m of pageMappings) {
+    content += `• <@${m.discord_user_id}> → **${m.thrill_username}**\n`;
+  }
+
+  content += `\n_Page ${page + 1} of ${totalPages} • Total mappings: ${mappings.length}_`;
+
+  return content;
 }
 
 async function handleTemplateCreate(interaction) {
@@ -1402,7 +2335,7 @@ async function handleTemplateCreate(interaction) {
     duration: null,
     currency: 'CAD',
     numWinners: null,
-    autoCheck: true,
+    autoCheck: false,
   });
 
   // Type select menu
@@ -1441,7 +2374,7 @@ async function handleTemplateCreate(interaction) {
     .setCustomId(`template_winners_select_${templateId}`)
     .setPlaceholder('Number of Winners')
     .addOptions(
-      Array.from({ length: 10 }, (_, idx) => ({
+      Array.from({ length: 6 }, (_, idx) => ({
         label: idx + 1 === 1 ? '1 winner' : `${idx + 1} winners`,
         value: String(idx + 1),
       }))
@@ -1477,7 +2410,7 @@ async function handleTemplateEdit(interaction) {
 
   // Fetch template from database
   const template = await dbGet(
-    'SELECT * FROM templates WHERE guild_id = ? AND name = ?',
+    'SELECT * FROM templates WHERE guild_id = $1 AND name = $2',
     [interaction.guildId, templateName]
   );
 
@@ -1525,7 +2458,7 @@ async function handleTemplateEdit(interaction) {
       Array.from({ length: 15 }, (_, idx) => ({
         label: `${idx + 1} minute${idx + 1 > 1 ? 's' : ''}`,
         value: String(idx + 1),
-        default: template.duration === idx + 1,
+        default: Number(template.duration) === idx + 1,
       }))
     );
 
@@ -1544,7 +2477,7 @@ async function handleTemplateEdit(interaction) {
     .setCustomId(`template_winners_select_${templateId}`)
     .setPlaceholder('Number of Winners')
     .addOptions(
-      Array.from({ length: 10 }, (_, idx) => ({
+      Array.from({ length: 6 }, (_, idx) => ({
         label: idx + 1 === 1 ? '1 winner' : `${idx + 1} winners`,
         value: String(idx + 1),
         default: template.num_winners === idx + 1,
@@ -1578,7 +2511,7 @@ async function handleTemplateEdit(interaction) {
 
 async function handleTemplateList(interaction) {
   const templates = await dbAll(
-    'SELECT * FROM templates WHERE guild_id = ?',
+    'SELECT * FROM templates WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1612,7 +2545,7 @@ async function handleTemplateList(interaction) {
 async function handleTemplateDelete(interaction) {
   const name = interaction.options.getString('name');
 
-  await dbRun('DELETE FROM templates WHERE guild_id = ? AND name = ?', [
+  await dbRun('DELETE FROM templates WHERE guild_id = $1 AND name = $2', [
     interaction.guildId,
     name,
   ]);
@@ -1625,7 +2558,7 @@ async function handleTemplateDelete(interaction) {
 
 async function handleDefaultsView(interaction) {
   const settings = await dbGet(
-    'SELECT * FROM server_settings WHERE guild_id = ?',
+    'SELECT * FROM server_settings WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1651,7 +2584,7 @@ async function handleDefaultsView(interaction) {
 
 async function handleDefaultsSet(interaction) {
   const settings = await dbGet(
-    'SELECT * FROM server_settings WHERE guild_id = ?',
+    'SELECT * FROM server_settings WHERE guild_id = $1',
     [interaction.guildId]
   );
 
@@ -1711,6 +2644,16 @@ async function handleDefaultsSet(interaction) {
 }
 
 async function handleManualCheckByThrill(interaction, thrillName) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  
+  // Check permissions - only Admin or Giveaway Managers
+  if (!isAdminOrBot(member)) {
+    return await interaction.reply({
+      content: '❌ You need Admin or Giveaway Managers role to use this command.',
+      flags: 64,
+    });
+  }
+
   const result = await checkEligibility(thrillName, 0);
 
   if (result.requiresManualCheck) {
@@ -1734,8 +2677,18 @@ async function handleManualCheckByThrill(interaction, thrillName) {
 }
 
 async function handleManualCheckByUser(interaction, user) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  
+  // Check permissions - only Admin or Giveaway Managers
+  if (!isAdminOrBot(member)) {
+    return await interaction.reply({
+      content: '❌ You need Admin or Giveaway Managers role to use this command.',
+      flags: 64,
+    });
+  }
+
   const mapped = await dbGet(
-    'SELECT thrill_username FROM user_map WHERE discord_user_id = ?',
+    'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
     [user.id]
   );
 
@@ -1773,6 +2726,197 @@ async function handleManualCheckByUser(interaction, user) {
 // ============================================================================
 
 async function handleButton(interaction) {
+  // Handle giveaway count pagination
+  if (interaction.customId.startsWith('gw_count_prev_')) {
+    const paginationId = interaction.customId.replace('gw_count_prev_', '');
+    const pag = pagination[paginationId];
+    
+    if (!pag) {
+      return await interaction.reply({
+        content: '❌ Pagination expired.',
+        flags: 64,
+      });
+    }
+
+    if (pag.currentPage > 0) {
+      pag.currentPage -= 1;
+      const embed = createCountEmbed(pag.userList, pag.currentPage, pag.usersPerPage, pag.totalPages);
+      
+      const buttons = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`gw_count_prev_${paginationId}`)
+            .setLabel('← Previous')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage === 0),
+          new ButtonBuilder()
+            .setCustomId(`gw_count_next_${paginationId}`)
+            .setLabel('Next →')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage >= pag.totalPages - 1),
+          new ButtonBuilder()
+            .setCustomId(`gw_count_close_${paginationId}`)
+            .setLabel('Close')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+      await interaction.update({
+        embeds: [embed],
+        components: [buttons],
+      });
+    }
+    return;
+  }
+
+  if (interaction.customId.startsWith('gw_count_next_')) {
+    const paginationId = interaction.customId.replace('gw_count_next_', '');
+    const pag = pagination[paginationId];
+    
+    if (!pag) {
+      return await interaction.reply({
+        content: '❌ Pagination expired.',
+        flags: 64,
+      });
+    }
+
+    if (pag.currentPage < pag.totalPages - 1) {
+      pag.currentPage += 1;
+      const embed = createCountEmbed(pag.userList, pag.currentPage, pag.usersPerPage, pag.totalPages);
+      
+      const buttons = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`gw_count_prev_${paginationId}`)
+            .setLabel('← Previous')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage === 0),
+          new ButtonBuilder()
+            .setCustomId(`gw_count_next_${paginationId}`)
+            .setLabel('Next →')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage >= pag.totalPages - 1),
+          new ButtonBuilder()
+            .setCustomId(`gw_count_close_${paginationId}`)
+            .setLabel('Close')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+      await interaction.update({
+        embeds: [embed],
+        components: [buttons],
+      });
+    }
+    return;
+  }
+
+  if (interaction.customId.startsWith('gw_count_close_')) {
+    const paginationId = interaction.customId.replace('gw_count_close_', '');
+    delete pagination[paginationId];
+    
+    await interaction.update({
+      content: '✅ Leaderboard closed.',
+      embeds: [],
+      components: [],
+    });
+    return;
+  }
+
+  // Handle /t list pagination - Previous
+  if (interaction.customId.startsWith('t_list_prev_')) {
+    const paginationId = interaction.customId.replace('t_list_prev_', '');
+    const pag = pagination[paginationId];
+    
+    if (!pag) {
+      return await interaction.reply({
+        content: '❌ Pagination expired.',
+        flags: 64,
+      });
+    }
+
+    if (pag.currentPage > 0) {
+      pag.currentPage -= 1;
+      const content = createMapListContent(pag.mappings, pag.currentPage, pag.mappingsPerPage, pag.totalPages);
+      
+      const buttons = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`t_list_prev_${paginationId}`)
+            .setLabel('← Previous')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage === 0),
+          new ButtonBuilder()
+            .setCustomId(`t_list_next_${paginationId}`)
+            .setLabel('Next →')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage >= pag.totalPages - 1),
+          new ButtonBuilder()
+            .setCustomId(`t_list_close_${paginationId}`)
+            .setLabel('Close')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+      await interaction.update({
+        content,
+        components: [buttons],
+      });
+    }
+    return;
+  }
+
+  // Handle /t list pagination - Next
+  if (interaction.customId.startsWith('t_list_next_')) {
+    const paginationId = interaction.customId.replace('t_list_next_', '');
+    const pag = pagination[paginationId];
+    
+    if (!pag) {
+      return await interaction.reply({
+        content: '❌ Pagination expired.',
+        flags: 64,
+      });
+    }
+
+    if (pag.currentPage < pag.totalPages - 1) {
+      pag.currentPage += 1;
+      const content = createMapListContent(pag.mappings, pag.currentPage, pag.mappingsPerPage, pag.totalPages);
+      
+      const buttons = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`t_list_prev_${paginationId}`)
+            .setLabel('← Previous')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage === 0),
+          new ButtonBuilder()
+            .setCustomId(`t_list_next_${paginationId}`)
+            .setLabel('Next →')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage >= pag.totalPages - 1),
+          new ButtonBuilder()
+            .setCustomId(`t_list_close_${paginationId}`)
+            .setLabel('Close')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+      await interaction.update({
+        content,
+        components: [buttons],
+      });
+    }
+    return;
+  }
+
+  // Handle /t list pagination - Close
+  if (interaction.customId.startsWith('t_list_close_')) {
+    const paginationId = interaction.customId.replace('t_list_close_', '');
+    delete pagination[paginationId];
+    
+    await interaction.update({
+      content: '✅ Mappings list closed.',
+      components: [],
+    });
+    return;
+  }
+
   // Handle modal retry button
   if (interaction.customId.startsWith('modal_retry_')) {
     const retryData = failedModalSubmissions.get(interaction.customId);
@@ -1806,15 +2950,17 @@ async function handleButton(interaction) {
   }
 
   if (interaction.customId === 'enter_giveaway') {
+    // Defer immediately to prevent timeout
+    await interaction.deferReply({ flags: 64 });
+
     const giveaway = await dbGet(
-      'SELECT * FROM active_giveaway WHERE guild_id = ?',
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
       [interaction.guildId]
     );
 
-    if (!giveaway || !giveaway.is_active) {
-      return await interaction.reply({
+    if (!giveaway) {
+      return await interaction.editReply({
         content: '❌ No active giveaway.',
-        flags: 64,
       });
     }
 
@@ -1822,23 +2968,39 @@ async function handleButton(interaction) {
     const ineligible = JSON.parse(giveaway.ineligible_entrants || '[]');
 
     if (eligible.includes(interaction.user.id) || ineligible.includes(interaction.user.id)) {
-      return await interaction.reply({
+      const leaveButtonId = `leave_giveaway_${interaction.guildId}_${interaction.user.id}`;
+      const leaveButton = new ButtonBuilder()
+        .setCustomId(leaveButtonId)
+        .setLabel('Leave Giveaway')
+        .setStyle(ButtonStyle.Danger);
+
+      await interaction.editReply({
         content: '✅ You already entered.',
-        flags: 64,
+        components: [new ActionRowBuilder().addComponents(leaveButton)],
       });
+
+      // Store interaction for later cleanup
+      alreadyEnteredInteractions.set(leaveButtonId, interaction);
+      return;
     }
 
     const mapped = await dbGet(
-      'SELECT thrill_username FROM user_map WHERE discord_user_id = ?',
+      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
       [interaction.user.id]
     );
 
-    // if (!mapped) {
-    //   return await interaction.reply({
-    //     content: '🔗 Please type your Thrill username in the giveaway channel to complete entry.',
-    //     flags: 64,
-    //   });
-    // }
+    // If no Thrill mapping, show link prompt
+    if (!mapped) {
+      const linkButton = new ButtonBuilder()
+        .setCustomId(`link_thrill_${interaction.guildId}`)
+        .setLabel('Submit Thrill username')
+        .setStyle(ButtonStyle.Primary);
+
+      return await interaction.editReply({
+        content: `**Link your Thrill**\n\nClick the button below to provide your Thrill username.\nThis is a one-time step and won't be required for future giveaways. Once submitted, you'll be entered.\n\n⚠️ MUST BE UNDER CODE DONIC ⚠️`,
+        components: [new ActionRowBuilder().addComponents(linkButton)],
+      });
+    }
 
     if (giveaway.auto_check && mapped) {
       const result = await checkEligibility(
@@ -1849,44 +3011,131 @@ async function handleButton(interaction) {
       if (result.requiresManualCheck) {
         eligible.push(interaction.user.id);
         await dbRun(
-          'UPDATE active_giveaway SET eligible_entrants = ? WHERE guild_id = ?',
+          'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
           [JSON.stringify(eligible), interaction.guildId]
         );
         await updateGiveawayMessage(interaction.guildId);
 
-        return await interaction.reply({
+        return await interaction.editReply({
           content: `🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code Donic + XP** if you win.`,
-          flags: 64,
         });
       }
 
       if (result.blocked) {
         ineligible.push(interaction.user.id);
         await dbRun(
-          'UPDATE active_giveaway SET ineligible_entrants = ? WHERE guild_id = ?',
+          'UPDATE active_giveaway SET ineligible_entrants = $1 WHERE guild_id = $2',
           [JSON.stringify(ineligible), interaction.guildId]
         );
         await updateGiveawayMessage(interaction.guildId);
 
-        return await interaction.reply({
+        return await interaction.editReply({
           content: `❌ ${result.reason}`,
-          flags: 64,
         });
       }
     }
 
     eligible.push(interaction.user.id);
     await dbRun(
-      'UPDATE active_giveaway SET eligible_entrants = ? WHERE guild_id = ?',
+      'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
       [JSON.stringify(eligible), interaction.guildId]
     );
 
     await updateGiveawayMessage(interaction.guildId);
 
-    await interaction.reply({
-      content: '🍀 Entered - Good luck!',
-      flags: 64,
+    const specialMessage = getSpecialEntryMessage(interaction.user.id);
+    let confirmationContent = '🍀 Entered - Good luck!';
+    if (specialMessage) {
+      confirmationContent += `\n\n${specialMessage}`;
+    }
+
+    await interaction.editReply({
+      content: confirmationContent,
     });
+  }
+
+  // ===== LEAVE GIVEAWAY BUTTON HANDLER =====
+  if (interaction.customId.startsWith('leave_giveaway_')) {
+    await interaction.deferReply({ flags: 64 });
+
+    // Parse: leave_giveaway_{guildId}_{userId}
+    const parts = interaction.customId.split('_');
+    const guildId = parts[2];
+    const userId = parts[3];
+
+    const giveaway = await dbGet(
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
+      [guildId]
+    );
+
+    if (!giveaway) {
+      return await interaction.editReply({
+        content: '❌ No active giveaway.',
+      });
+    }
+
+    const eligible = JSON.parse(giveaway.eligible_entrants || '[]');
+    const ineligible = JSON.parse(giveaway.ineligible_entrants || '[]');
+
+    // Remove user from both lists
+    const eligibleIndex = eligible.indexOf(userId);
+    const ineligibleIndex = ineligible.indexOf(userId);
+
+    if (eligibleIndex > -1) {
+      eligible.splice(eligibleIndex, 1);
+    }
+    if (ineligibleIndex > -1) {
+      ineligible.splice(ineligibleIndex, 1);
+    }
+
+    // Update database
+    await dbRun(
+      'UPDATE active_giveaway SET eligible_entrants = $1, ineligible_entrants = $2 WHERE guild_id = $3',
+      [JSON.stringify(eligible), JSON.stringify(ineligible), guildId]
+    );
+
+    // Update the giveaway message
+    await updateGiveawayMessage(guildId);
+
+    // Delete the stored interaction and dismiss the "already entered" message
+    const leaveButtonId = interaction.customId;
+    const storedInteraction = alreadyEnteredInteractions.get(leaveButtonId);
+    if (storedInteraction) {
+      try {
+        await storedInteraction.deleteReply();
+        alreadyEnteredInteractions.delete(leaveButtonId);
+      } catch (err) {
+        console.error('Failed to dismiss already entered message:', err.message);
+      }
+    }
+
+    // Send ephemeral success message
+    await interaction.editReply({
+      content: '✅ You have successfully left the giveaway.',
+    });
+  }
+
+  // ===== LINK THRILL BUTTON HANDLER =====
+  if (interaction.customId.startsWith('link_thrill_')) {
+    const guildId = interaction.customId.replace('link_thrill_', '');
+
+    const modal = new ModalBuilder()
+      .setCustomId(`submit_thrill_username_${guildId}`)
+      .setTitle('Link your Thrill Username');
+
+    const usernameInput = new TextInputBuilder()
+      .setCustomId('thrill_username')
+      .setLabel('Thrill Username')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('Enter your Thrill username')
+      .setRequired(true)
+      .setMinLength(1)
+      .setMaxLength(50);
+
+    const actionRow = new ActionRowBuilder().addComponents(usernameInput);
+    modal.addComponents(actionRow);
+
+    await interaction.showModal(modal);
   }
 
   // ===== TEMPLATE SELECT CONTINUE BUTTON HANDLER =====
@@ -1917,9 +3166,9 @@ async function handleButton(interaction) {
 
     const memberInput = new TextInputBuilder()
       .setCustomId('template_with_member')
-      .setLabel('Member to feature')
+      .setLabel('Requested by')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('e.g., "donic" (or leave blank)')
+      .setPlaceholder('Username requesting this giveaway')
       .setRequired(false);
     if (data.withMember) memberInput.setValue(data.withMember);
 
@@ -1927,14 +3176,15 @@ async function handleButton(interaction) {
       .setCustomId('template_amount')
       .setLabel('Amount')
       .setStyle(TextInputStyle.Short)
+      .setPlaceholder('Whole number only. Example: 50')
       .setRequired(false);
     if (data.amount) amountInput.setValue(String(data.amount));
 
     const minXpInput = new TextInputBuilder()
       .setCustomId('template_min_xp')
-      .setLabel('Minimum XP *in thousands*')
+      .setLabel('Minimum XP in thousands')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('0')
+      .setPlaceholder('Whole number in thousands. Example: 10 means 10k XP')
       .setRequired(false);
     if (data.minXp) minXpInput.setValue(String(data.minXp));
 
@@ -1942,7 +3192,7 @@ async function handleButton(interaction) {
       .setCustomId('template_additional_requirements')
       .setLabel('Other Requirements (optional)')
       .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder('Use Shift+Enter for new lines')
+      .setPlaceholder('Additional rules')
       .setRequired(false);
     if (data.additionalRequirements) requirementsInput.setValue(data.additionalRequirements);
 
@@ -2246,26 +3496,32 @@ async function handleModal(interaction) {
     // Build update query dynamically based on what was provided
     const updates = [];
     const values = [];
+    let paramCount = 1;
 
     if (typeInput !== null) {
-      updates.push('default_type = ?');
+      updates.push(`default_type = $${paramCount}`);
       values.push(typeInput);
+      paramCount++;
     }
     if (duration !== null) {
-      updates.push('default_duration = ?');
+      updates.push(`default_duration = $${paramCount}`);
       values.push(duration);
+      paramCount++;
     }
     if (currencyInput !== null) {
-      updates.push('default_currency = ?');
+      updates.push(`default_currency = $${paramCount}`);
       values.push(currencyInput);
+      paramCount++;
     }
     if (winners !== null) {
-      updates.push('default_winners = ?');
+      updates.push(`default_winners = $${paramCount}`);
       values.push(winners);
+      paramCount++;
     }
     if (autocheck !== null) {
-      updates.push('default_autocheck = ?');
+      updates.push(`default_autocheck = $${paramCount}`);
       values.push(autocheck);
+      paramCount++;
     }
 
     if (updates.length === 0) {
@@ -2278,13 +3534,13 @@ async function handleModal(interaction) {
 
     // Use INSERT OR IGNORE to insert if doesn't exist, then UPDATE if it does
     await dbRun(
-      `INSERT OR IGNORE INTO server_settings (guild_id) VALUES (?)`,
+      `INSERT INTO server_settings (guild_id) VALUES ($1) ON CONFLICT DO NOTHING`,
       [interaction.guildId]
     );
 
     await dbRun(
-      `UPDATE server_settings SET ${updates.join(', ')} WHERE guild_id = ?`,
-      [...values.slice(0, -1), interaction.guildId]
+      `UPDATE server_settings SET ${updates.join(', ')} WHERE guild_id = $${paramCount}`,
+      values
     );
 
     const summary = [];
@@ -2376,8 +3632,8 @@ async function handleModal(interaction) {
     if (stepData.isEditing && stepData.originalTemplateId) {
       // UPDATE existing template
       await dbRun(
-        `UPDATE templates SET name = ?, type = ?, duration = ?, num_winners = ?, auto_check = ?, min_xp = ?, amount = ?, currency = ?, with_member = ?, additional_requirements = ?
-         WHERE template_id = ?`,
+        `UPDATE templates SET name = $1, type = $2, duration = $3, num_winners = $4, auto_check = $5, min_xp = $6, amount = $7, currency = $8, with_member = $9, additional_requirements = $10
+         WHERE template_id = $11`,
         [
           stepData.name,
           stepData.type,
@@ -2398,7 +3654,7 @@ async function handleModal(interaction) {
       
       await dbRun(
         `INSERT INTO templates (guild_id, template_id, name, type, duration, num_winners, auto_check, min_xp, amount, currency, with_member, additional_requirements)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           interaction.guildId,
           templateId2,
@@ -2465,6 +3721,60 @@ async function handleModal(interaction) {
     const amountInput = interaction.fields.getTextInputValue('gw_amount') || '';
     const minXpInput = interaction.fields.getTextInputValue('gw_min_xp') || '';
     const otherReq = interaction.fields.getTextInputValue('gw_other_req') || null;
+
+    // Validate: Amount must be integer only
+    if (amountInput.trim() !== '') {
+      if (!/^\d+$/.test(amountInput.trim())) {
+        const retryId = `modal_retry_${interaction.user.id}_${Date.now()}`;
+        failedModalSubmissions.set(retryId, {
+          customId: interaction.customId,
+          member: memberInput,
+          amount: amountInput,
+          minXp: minXpInput,
+          otherReq: otherReq || '',
+          userId: interaction.user.id
+        });
+
+        const retryButton = new ButtonBuilder()
+          .setCustomId(retryId)
+          .setLabel('Retry')
+          .setStyle(ButtonStyle.Primary);
+
+        await interaction.editReply({
+          content: '❌ **Amount must be a whole number** (no $ or commas). Example: 50',
+          components: [new ActionRowBuilder().addComponents(retryButton)],
+        });
+        
+        return;
+      }
+    }
+
+    // Validate: Minimum XP must be integer only
+    if (minXpInput.trim() !== '') {
+      if (!/^\d+$/.test(minXpInput.trim())) {
+        const retryId = `modal_retry_${interaction.user.id}_${Date.now()}`;
+        failedModalSubmissions.set(retryId, {
+          customId: interaction.customId,
+          member: memberInput,
+          amount: amountInput,
+          minXp: minXpInput,
+          otherReq: otherReq || '',
+          userId: interaction.user.id
+        });
+
+        const retryButton = new ButtonBuilder()
+          .setCustomId(retryId)
+          .setLabel('Retry')
+          .setStyle(ButtonStyle.Primary);
+
+        await interaction.editReply({
+          content: '❌ **Minimum XP must be a whole number** (in thousands). Example: 10 means 10k XP',
+          components: [new ActionRowBuilder().addComponents(retryButton)],
+        });
+        
+        return;
+      }
+    }
 
     // Validate: Min XP ALWAYS requires Amount
     if (minXpInput.trim() !== '' && amountInput.trim() === '') {
@@ -2570,15 +3880,23 @@ async function handleModal(interaction) {
 
     let reqText = '';
     if (minXp > 0) {
-      reqText += `• ${minXp}k XP`;
+      reqText += `• Minimum ${minXp}k XP wagered`;
     }
     if (otherReq) {
-      const reqLines = otherReq.split('\n').filter(line => line.trim());
+      const reqLines = otherReq.split('\n');
       if (reqLines.length > 0) {
         if (reqText) {
           reqText += '\n';
         }
-        reqText += reqLines.map(line => `• ${line}`).join('\n');
+        reqText += reqLines.map(line => {
+          if (!line.trim()) {
+            return '';
+          }
+          if (line.trim().startsWith('|')) {
+            return line.trim().substring(1);
+          }
+          return `• ${line}`;
+        }).join('\n');
       }
     }
     
@@ -2632,13 +3950,46 @@ embed.addFields(
 
     const withMember = selectedMember !== 'none' ? selectedMember : null;
 
-    // Delete any old giveaway for this guild
-    await dbRun('DELETE FROM active_giveaway WHERE guild_id = ?', [interaction.guildId]);
+    // Save current giveaway to history before deleting
+    const existingGiveaway = await dbGet(
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
+      [interaction.guildId]
+    );
+    
+    if (existingGiveaway) {
+      await dbRun(
+        `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+        [
+          existingGiveaway.guild_id,
+          existingGiveaway.channel_id,
+          existingGiveaway.message_id,
+          existingGiveaway.giveaway_type,
+          existingGiveaway.min_xp,
+          existingGiveaway.additional_requirements,
+          existingGiveaway.amount,
+          existingGiveaway.currency,
+          existingGiveaway.auto_check,
+          existingGiveaway.hosted_by,
+          existingGiveaway.with_member,
+          existingGiveaway.num_winners,
+          existingGiveaway.eligible_entrants,
+          existingGiveaway.ineligible_entrants,
+          existingGiveaway.initial_winners,
+          existingGiveaway.started_at,
+          existingGiveaway.duration_minutes,
+          existingGiveaway.ends_at,
+        ]
+      );
+    }
+
+    // Delete the old active giveaway
+    await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [interaction.guildId]);
 
     await dbRun(
       `INSERT INTO active_giveaway 
-       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
       [
         interaction.guildId,
         channel.id,
@@ -2658,7 +4009,6 @@ embed.addFields(
         Date.now(),
         duration,
         endTime,
-        1,
       ]
     );
 
@@ -2669,17 +4019,120 @@ embed.addFields(
     startGiveawayUpdateLoop(interaction.guildId);
     startAutoEndTimer(interaction.guildId, endTime);
   }
+
+  // ===== SUBMIT THRILL USERNAME MODAL HANDLER =====
+  if (interaction.customId.startsWith('submit_thrill_username_')) {
+    await interaction.deferReply({ flags: 64 });
+
+    const guildId = interaction.customId.replace('submit_thrill_username_', '');
+    const thrillUsername = interaction.fields.getTextInputValue('thrill_username')?.trim();
+
+    if (!thrillUsername) {
+      return await interaction.editReply({
+        content: '❌ Please enter a Thrill username.',
+      });
+    }
+
+    try {
+      // Store the Thrill username mapping
+      await dbRun(
+        `INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (discord_user_id)
+         DO UPDATE SET thrill_username = $2, updated_at = $3`,
+        [interaction.user.id, thrillUsername, Date.now()]
+      );
+
+      // Get the active giveaway
+      const giveaway = await dbGet(
+        'SELECT * FROM active_giveaway WHERE guild_id = $1',
+        [guildId]
+      );
+
+      if (!giveaway) {
+        return await interaction.editReply({
+          content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!`,
+        });
+      }
+
+      const eligible = JSON.parse(giveaway.eligible_entrants || '[]');
+      const ineligible = JSON.parse(giveaway.ineligible_entrants || '[]');
+
+      // Check if already entered
+      if (eligible.includes(interaction.user.id) || ineligible.includes(interaction.user.id)) {
+        return await interaction.editReply({
+          content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n✅ You already entered.`,
+        });
+      }
+
+      // Check eligibility if auto_check is enabled
+      if (giveaway.auto_check) {
+        const result = await checkEligibility(thrillUsername, giveaway.min_xp);
+
+        if (result.requiresManualCheck) {
+          eligible.push(interaction.user.id);
+          await dbRun(
+            'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
+            [JSON.stringify(eligible), guildId]
+          );
+          await updateGiveawayMessage(guildId);
+
+          return await interaction.editReply({
+            content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code Donic + XP** if you win.`,
+          });
+        }
+
+        if (result.blocked) {
+          ineligible.push(interaction.user.id);
+          await dbRun(
+            'UPDATE active_giveaway SET ineligible_entrants = $1 WHERE guild_id = $2',
+            [JSON.stringify(ineligible), guildId]
+          );
+          await updateGiveawayMessage(guildId);
+
+          return await interaction.editReply({
+            content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n❌ ${result.reason}`,
+          });
+        }
+      }
+
+      // Add to eligible entrants
+      eligible.push(interaction.user.id);
+      await dbRun(
+        'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
+        [JSON.stringify(eligible), guildId]
+      );
+
+      await updateGiveawayMessage(guildId);
+
+      const specialMessage = getSpecialEntryMessage(interaction.user.id);
+      let confirmationContent = `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!`;
+      if (specialMessage) {
+        confirmationContent += `\n\n${specialMessage}`;
+      }
+
+      await interaction.editReply({
+        content: confirmationContent,
+      });
+    } catch (err) {
+      console.error('Error submitting Thrill username:', err);
+      await interaction.editReply({
+        content: '❌ Error saving Thrill username.',
+      });
+    }
+  }
 }
 
 // ============================================================================
 // MESSAGE HANDLER (for username entry)
 // ============================================================================
 
+/*
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [message.guildId]
   );
 
@@ -2689,7 +4142,7 @@ client.on('messageCreate', async (message) => {
   if (message.channelId !== giveawayChannel.id) return;
 
   const mapped = await dbGet(
-    'SELECT thrill_username FROM user_map WHERE discord_user_id = ?',
+    'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
     [message.author.id]
   );
 
@@ -2701,8 +4154,9 @@ client.on('messageCreate', async (message) => {
     }
 
     await dbRun(
-      `INSERT OR REPLACE INTO user_map (discord_user_id, thrill_username, updated_at) 
-       VALUES (?, ?, ?)`,
+`INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (discord_user_id) DO UPDATE SET thrill_username = EXCLUDED.thrill_username, updated_at = EXCLUDED.updated_at`,
       [message.author.id, thrillUsername, Date.now()]
     );
 
@@ -2718,7 +4172,7 @@ client.on('messageCreate', async (message) => {
       if (eligibilityResult.requiresManualCheck) {
         eligible.push(message.author.id);
         await dbRun(
-          'UPDATE active_giveaway SET eligible_entrants = ? WHERE guild_id = ?',
+          'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
           [JSON.stringify(eligible), message.guildId]
         );
 
@@ -2733,7 +4187,7 @@ client.on('messageCreate', async (message) => {
       if (eligibilityResult.blocked) {
         ineligible.push(message.author.id);
         await dbRun(
-          'UPDATE active_giveaway SET ineligible_entrants = ? WHERE guild_id = ?',
+          'UPDATE active_giveaway SET ineligible_entrants = $1 WHERE guild_id = $2',
           [JSON.stringify(ineligible), message.guildId]
         );
 
@@ -2747,14 +4201,14 @@ client.on('messageCreate', async (message) => {
 
       eligible.push(message.author.id);
       await dbRun(
-        'UPDATE active_giveaway SET eligible_entrants = ? WHERE guild_id = ?',
+        'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
         [JSON.stringify(eligible), message.guildId]
       );
     } else {
       const eligible = JSON.parse(giveaway.eligible_entrants || '[]');
       eligible.push(message.author.id);
       await dbRun(
-        'UPDATE active_giveaway SET eligible_entrants = ? WHERE guild_id = ?',
+        'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
         [JSON.stringify(eligible), message.guildId]
       );
     }
@@ -2766,6 +4220,7 @@ client.on('messageCreate', async (message) => {
     });
   }
 });
+*/
 
 // ============================================================================
 // ELIGIBILITY CHECK
@@ -2773,7 +4228,7 @@ client.on('messageCreate', async (message) => {
 
 async function checkEligibility(thrillUsername, minXp) {
   const cached = await dbGet(
-    'SELECT * FROM eligibility_cache WHERE thrill_username = ?',
+    'SELECT * FROM eligibility_cache WHERE thrill_username = $1',
     [thrillUsername]
   );
 
@@ -2813,9 +4268,10 @@ async function checkEligibility(thrillUsername, minXp) {
   underDonic = apiResult.underDonic;
 
   await dbRun(
-    `INSERT OR REPLACE INTO eligibility_cache 
+    `INSERT INTO eligibility_cache 
      (thrill_username, last_xp, last_under_donic, last_checked_at)
-     VALUES (?, ?, ?, ?)`,
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (thrill_username) DO UPDATE SET last_xp = EXCLUDED.last_xp, last_under_donic = EXCLUDED.last_under_donic, last_checked_at = EXCLUDED.last_checked_at`,
     [thrillUsername, xp, underDonic ? 1 : 0, Date.now()]
   );
 
@@ -2851,11 +4307,11 @@ function startGiveawayUpdateLoop(guildId) {
 
   const interval = setInterval(async () => {
     const giveaway = await dbGet(
-      'SELECT * FROM active_giveaway WHERE guild_id = ?',
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
       [guildId]
     );
 
-    if (!giveaway || !giveaway.is_active) {
+    if (!giveaway) {
       clearInterval(interval);
       updateLoops.delete(guildId);
       return;
@@ -2876,18 +4332,51 @@ function startAutoEndTimer(guildId, endTime) {
 
   const timer = setTimeout(async () => {
     const giveaway = await dbGet(
-      'SELECT * FROM active_giveaway WHERE guild_id = ?',
+      'SELECT * FROM active_giveaway WHERE guild_id = $1',
       [guildId]
     );
 
-    if (giveaway && giveaway.is_active) {
+    if (giveaway) {
+      // Stop the update loop before editing
+      if (updateLoops.has(guildId)) {
+        clearInterval(updateLoops.get(guildId));
+        updateLoops.delete(guildId);
+      }
+
       console.log(`⏰ Giveaway timer expired for guild ${guildId}`);
       const eligible = JSON.parse(giveaway.eligible_entrants || '[]');
       console.log(`📋 Eligible entrants: ${eligible.length}`);
 
       if (eligible.length === 0) {
         console.log(`⚠️ No eligible entrants`);
-        await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = ?', [
+        
+        // Save to history before deleting
+        await dbRun(
+          `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+          [
+            giveaway.guild_id,
+            giveaway.channel_id,
+            giveaway.message_id,
+            giveaway.giveaway_type,
+            giveaway.min_xp,
+            giveaway.additional_requirements,
+            giveaway.amount,
+            giveaway.currency,
+            giveaway.auto_check,
+            giveaway.hosted_by,
+            giveaway.with_member,
+            giveaway.num_winners,
+            giveaway.eligible_entrants,
+            giveaway.ineligible_entrants,
+            giveaway.initial_winners,
+            giveaway.started_at,
+            giveaway.duration_minutes,
+            giveaway.ends_at,
+          ]
+        );
+        
+        await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [
           guildId,
         ]);
         try {
@@ -2925,14 +4414,14 @@ function startAutoEndTimer(guildId, endTime) {
         }
       } else {
         console.log(`🎉 Selecting ${giveaway.num_winners} winner(s) from ${eligible.length} eligible`);
-        const winnerIds = selectWinners(eligible, giveaway.num_winners);
+        const winnerIds = await selectWinners(eligible, giveaway.num_winners, guildId);
         try {
           const channel = await client.channels.fetch(giveaway.channel_id);
           console.log(`✓ Fetched channel: ${channel.id}`);
           const message = await channel.messages.fetch(giveaway.message_id);
           console.log(`✓ Fetched message: ${message.id}`);
 
-          await dbRun('UPDATE active_giveaway SET initial_winners = ? WHERE guild_id = ?', [
+          await dbRun('UPDATE active_giveaway SET initial_winners = $1 WHERE guild_id = $2', [
             JSON.stringify(winnerIds),
             guildId,
           ]);
@@ -2941,36 +4430,17 @@ function startAutoEndTimer(guildId, endTime) {
 
           for (const winnerId of winnerIds) {
             const userMap = await dbGet(
-              'SELECT thrill_username FROM user_map WHERE discord_user_id = ?',
+              'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
               [winnerId]
             );
 
-            let winnerText = `<@${winnerId}>`;
-            console.log(`🔍 Checking winner ${winnerId}: auto_check=${giveaway.auto_check}, userMap=${userMap ? 'YES' : 'NO'}`);
-
-            if (giveaway.auto_check && userMap) {
-              const eligibility = await checkEligibility(
-                userMap.thrill_username,
-                giveaway.min_xp
-              );
-
-              console.log(`📊 Eligibility result:`, eligibility);
-
-              if (eligibility.requiresManualCheck) {
-                winnerText += ` (Please comment *fresh* screenshots of **code Donic + XP**)`;
-              } else if (eligibility.blocked) {
-                winnerText += ` ⚠️ **Ineligible**: ${eligibility.reason}`;
-              } else {
-                winnerText += ` ⭐ XP: ${formatXP(eligibility.xp)}`;
-              }
-            } else if (!giveaway.auto_check) {
-              winnerText += ` (Please comment *fresh* screenshots of **code Donic + XP**)`;
-            } else {
-              console.log(`⚠️ No userMap for winner ${winnerId}`);
-            }
+            const thrillUsername = userMap?.thrill_username || 'Not linked';
+            let winnerText = `<@${winnerId}> -- Thrill: ${thrillUsername}`;
 
             winnerListText += winnerText + '\n';
           }
+
+          winnerListText += '\n*(Please comment fresh screenshots of code Donic + XP)*';
 
           const embed = EmbedBuilder.from(message.embeds[0]);
           
@@ -2992,12 +4462,46 @@ function startAutoEndTimer(guildId, endTime) {
           console.log(`✅ Updated message with winners`);
           
           // Send announcement message
-          const announcement = `\n**Giveaway Ended!**\n\n🎉 **Congratulations**\n${winnerListText}`;
+          const announcement = `\n**Giveaway Ended!**\n\n🎉 **Congratulations**\n${winnerListText.trim()}`;
           console.log(`📢 Sending announcement: ${announcement.substring(0, 50)}...`);
           await channel.send(announcement);
           console.log(`✅ Sent announcement message`);
 
-          await dbRun('UPDATE active_giveaway SET is_active = 0 WHERE guild_id = ?', [
+          // Fetch updated giveaway with initial_winners before archiving
+          const updatedGiveaway = await dbGet(
+            'SELECT * FROM active_giveaway WHERE guild_id = $1',
+            [guildId]
+          );
+          
+          if (updatedGiveaway) {
+            // Save to history before deleting
+            await dbRun(
+              `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+              [
+                updatedGiveaway.guild_id,
+                updatedGiveaway.channel_id,
+                updatedGiveaway.message_id,
+                updatedGiveaway.giveaway_type,
+                updatedGiveaway.min_xp,
+                updatedGiveaway.additional_requirements,
+                updatedGiveaway.amount,
+                updatedGiveaway.currency,
+                updatedGiveaway.auto_check,
+                updatedGiveaway.hosted_by,
+                updatedGiveaway.with_member,
+                updatedGiveaway.num_winners,
+                updatedGiveaway.eligible_entrants,
+                updatedGiveaway.ineligible_entrants,
+                updatedGiveaway.initial_winners,
+                updatedGiveaway.started_at,
+                updatedGiveaway.duration_minutes,
+                updatedGiveaway.ends_at,
+              ]
+            );
+          }
+
+          await dbRun('DELETE FROM active_giveaway WHERE guild_id = $1', [
             guildId,
           ]);
         } catch (err) {
@@ -3015,7 +4519,7 @@ function startAutoEndTimer(guildId, endTime) {
 
 async function updateGiveawayMessage(guildId) {
   const giveaway = await dbGet(
-    'SELECT * FROM active_giveaway WHERE guild_id = ?',
+    'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [guildId]
   );
 
@@ -3051,15 +4555,23 @@ async function updateGiveawayMessage(guildId) {
 
     let reqText = '';
     if (giveaway.min_xp > 0) {
-      reqText += `• ${giveaway.min_xp}k XP`;
+      reqText += `• Minimum ${giveaway.min_xp}k XP wagered`;
     }
     if (giveaway.additional_requirements) {
-      const reqLines = giveaway.additional_requirements.split('\n').filter(line => line.trim());
+      const reqLines = giveaway.additional_requirements.split('\n');
       if (reqLines.length > 0) {
         if (reqText) {
           reqText += '\n';
         }
-        reqText += reqLines.map(line => `• ${line}`).join('\n');
+        reqText += reqLines.map(line => {
+          if (!line.trim()) {
+            return '';
+          }
+          if (line.trim().startsWith('|')) {
+            return line.trim().substring(1);
+          }
+          return `• ${line}`;
+        }).join('\n');
       }
     }
 
@@ -3117,16 +4629,21 @@ embed.addFields(
   }
 }
 
-function selectWinners(entrants, count) {
+async function selectWinners(entrants, count, guildId) {
   if (entrants.length === 0) return [];
 
+  const validEntrants = entrants.filter(e => e); // Remove any falsy values
   const winners = [];
-  const copy = [...entrants];
+  const availableEntrants = [...validEntrants];
 
-  for (let i = 0; i < Math.min(count, copy.length); i++) {
-    const randomIndex = Math.floor(Math.random() * copy.length);
-    winners.push(copy[randomIndex]);
-    copy.splice(randomIndex, 1);
+  // Pure random selection - no weighting
+  for (let i = 0; i < Math.min(count, availableEntrants.length); i++) {
+    const randomIndex = Math.floor(Math.random() * availableEntrants.length);
+    const winner = availableEntrants[randomIndex];
+    winners.push(winner);
+
+    // Remove from available for next selection
+    availableEntrants.splice(randomIndex, 1);
   }
 
   return winners;
@@ -3136,8 +4653,8 @@ function selectWinners(entrants, count) {
 // REGISTER SLASH COMMANDS
 // ============================================================================
 
-client.once('ready', async () => {
-  const commands = [
+function getCommands() {
+  return [
     {
       name: 'gw',
       description: 'Giveaway commands',
@@ -3182,6 +4699,21 @@ client.once('ready', async () => {
           type: 1,
           name: 'reroll',
           description: 'Reroll winner(s) (excludes initial winners)',
+          options: [
+            {
+              type: 4,
+              name: 'how_many',
+              description: 'Number of winners to reroll (default: all)',
+              required: false,
+              min_value: 1,
+              max_value: 6,
+            },
+          ],
+        },
+        {
+          type: 1,
+          name: 'runback',
+          description: 'Run another giveaway with exact same values as last one',
         },
         {
           type: 2,
@@ -3233,6 +4765,16 @@ client.once('ready', async () => {
               description: 'Set server defaults for Step 1 fields',
             },
           ],
+        },
+        {
+          type: 1,
+          name: 'count',
+          description: 'View giveaway win counts for all users',
+        },
+        {
+          type: 1,
+          name: 'entrants',
+          description: 'View eligible entrants from the most recent giveaway',
         },
       ],
     },
@@ -3286,11 +4828,53 @@ client.once('ready', async () => {
         { type: 6, name: 'user', description: 'Discord user', required: false },
       ],
     },
+    {
+      name: 'xp',
+      description: 'Manage XP records',
+      options: [
+        {
+          type: 1,
+          name: 'edit',
+          description: 'Edit a member\'s XP',
+          options: [
+            { type: 6, name: 'member', description: 'Discord member', required: true },
+            { type: 3, name: 'xp', description: 'XP amount (e.g. 5000, 5k, 2M)', required: true },
+          ],
+        },
+        {
+          type: 1,
+          name: 'view',
+          description: 'View a member\'s XP record',
+          options: [
+            { type: 6, name: 'member', description: 'Discord member', required: true },
+          ],
+        },
+      ],
+    },
   ];
+}
+
+client.once('ready', async () => {
+  // Initialize database
+  await initializeDatabase();
+
+  const commands = getCommands();
+
+  // Clean up old /gwmap command if it exists
+  try {
+    const existingCommands = await client.application?.commands.fetch();
+    const gwmapCommand = existingCommands?.find(cmd => cmd.name === 'gwmap');
+    if (gwmapCommand) {
+      await gwmapCommand.delete();
+      console.log('🗑️ Deleted old /gwmap command from Discord');
+    }
+  } catch (err) {
+    console.error('Error cleaning up old /gwmap command:', err);
+  }
 
   // Register commands globally
-await client.application?.commands.set(commands);
-console.log(`✅ Slash commands registered globally`);
+  await client.application?.commands.set(commands);
+  console.log(`✅ Slash commands registered globally`);
 });
 
 // ============================================================================
