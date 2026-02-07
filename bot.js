@@ -2752,7 +2752,6 @@ async function handleButton(interaction) {
       .setLabel('Requested by')
       .setStyle(TextInputStyle.Short)
       .setPlaceholder('Username requesting this giveaway')
-      .setHelper('Username requesting this giveaway. Example: Donic')
       .setRequired(false);
     if (data.withMember) memberInput.setValue(data.withMember);
 
@@ -2760,7 +2759,7 @@ async function handleButton(interaction) {
       .setCustomId('template_amount')
       .setLabel('Amount')
       .setStyle(TextInputStyle.Short)
-      .setHelper('Whole number only. Example: 50')
+      .setPlaceholder('Whole number only. Example: 50')
       .setRequired(false);
     if (data.amount) amountInput.setValue(String(data.amount));
 
@@ -2768,8 +2767,7 @@ async function handleButton(interaction) {
       .setCustomId('template_min_xp')
       .setLabel('Minimum XP in thousands')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('0')
-      .setHelper('Whole number in thousands. Example: 10 means 10k XP')
+      .setPlaceholder('Whole number in thousands. Example: 10 means 10k XP')
       .setRequired(false);
     if (data.minXp) minXpInput.setValue(String(data.minXp));
 
@@ -2778,7 +2776,6 @@ async function handleButton(interaction) {
       .setLabel('Other Requirements (optional)')
       .setStyle(TextInputStyle.Paragraph)
       .setPlaceholder('Additional rules')
-      .setHelper('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
       .setRequired(false);
     if (data.additionalRequirements) requirementsInput.setValue(data.additionalRequirements);
 
