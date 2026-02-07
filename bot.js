@@ -790,13 +790,45 @@ async function handleMapList(interaction) {
     });
   }
 
-  let list = '**User Mappings:**\n';
-  for (const m of mappings) {
-    list += `• <@${m.discord_user_id}> → **${m.thrill_username}**\n`;
-  }
+  // Pagination: 20 mappings per page
+  const mappingsPerPage = 20;
+  const totalPages = Math.ceil(mappings.length / mappingsPerPage);
+
+  // Create pagination object
+  const paginationId = `t_list_${interaction.user.id}_${Date.now()}`;
+  pagination[paginationId] = {
+    mappings,
+    currentPage: 0,
+    totalPages,
+    mappingsPerPage,
+    guildId: interaction.guildId,
+  };
+
+  // Create first page
+  const content = createMapListContent(mappings, 0, mappingsPerPage, totalPages);
+
+  // Create navigation buttons
+  const buttons = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`t_list_prev_${paginationId}`)
+        .setLabel('← Previous')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId(`t_list_next_${paginationId}`)
+        .setLabel('Next →')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(totalPages <= 1),
+      new ButtonBuilder()
+        .setCustomId(`t_list_close_${paginationId}`)
+        .setLabel('Close')
+        .setStyle(ButtonStyle.Danger)
+    );
 
   await interaction.reply({
-    content: list,
+    content,
+    components: totalPages > 1 ? [buttons] : [],
     flags: 64,
   });
 }
@@ -2276,6 +2308,21 @@ function createCountEmbed(userList, page, usersPerPage, totalPages) {
   return embed;
 }
 
+function createMapListContent(mappings, page, mappingsPerPage, totalPages) {
+  const start = page * mappingsPerPage;
+  const end = Math.min(start + mappingsPerPage, mappings.length);
+  const pageMappings = mappings.slice(start, end);
+
+  let content = '**User Mappings:**\n';
+  for (const m of pageMappings) {
+    content += `• <@${m.discord_user_id}> → **${m.thrill_username}**\n`;
+  }
+
+  content += `\n_Page ${page + 1} of ${totalPages} • Total mappings: ${mappings.length}_`;
+
+  return content;
+}
+
 async function handleTemplateCreate(interaction) {
   const name = interaction.options.getString('name');
 
@@ -2769,6 +2816,102 @@ async function handleButton(interaction) {
     await interaction.update({
       content: '✅ Leaderboard closed.',
       embeds: [],
+      components: [],
+    });
+    return;
+  }
+
+  // Handle /t list pagination - Previous
+  if (interaction.customId.startsWith('t_list_prev_')) {
+    const paginationId = interaction.customId.replace('t_list_prev_', '');
+    const pag = pagination[paginationId];
+    
+    if (!pag) {
+      return await interaction.reply({
+        content: '❌ Pagination expired.',
+        flags: 64,
+      });
+    }
+
+    if (pag.currentPage > 0) {
+      pag.currentPage -= 1;
+      const content = createMapListContent(pag.mappings, pag.currentPage, pag.mappingsPerPage, pag.totalPages);
+      
+      const buttons = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`t_list_prev_${paginationId}`)
+            .setLabel('← Previous')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage === 0),
+          new ButtonBuilder()
+            .setCustomId(`t_list_next_${paginationId}`)
+            .setLabel('Next →')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage >= pag.totalPages - 1),
+          new ButtonBuilder()
+            .setCustomId(`t_list_close_${paginationId}`)
+            .setLabel('Close')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+      await interaction.update({
+        content,
+        components: [buttons],
+      });
+    }
+    return;
+  }
+
+  // Handle /t list pagination - Next
+  if (interaction.customId.startsWith('t_list_next_')) {
+    const paginationId = interaction.customId.replace('t_list_next_', '');
+    const pag = pagination[paginationId];
+    
+    if (!pag) {
+      return await interaction.reply({
+        content: '❌ Pagination expired.',
+        flags: 64,
+      });
+    }
+
+    if (pag.currentPage < pag.totalPages - 1) {
+      pag.currentPage += 1;
+      const content = createMapListContent(pag.mappings, pag.currentPage, pag.mappingsPerPage, pag.totalPages);
+      
+      const buttons = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`t_list_prev_${paginationId}`)
+            .setLabel('← Previous')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage === 0),
+          new ButtonBuilder()
+            .setCustomId(`t_list_next_${paginationId}`)
+            .setLabel('Next →')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(pag.currentPage >= pag.totalPages - 1),
+          new ButtonBuilder()
+            .setCustomId(`t_list_close_${paginationId}`)
+            .setLabel('Close')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+      await interaction.update({
+        content,
+        components: [buttons],
+      });
+    }
+    return;
+  }
+
+  // Handle /t list pagination - Close
+  if (interaction.customId.startsWith('t_list_close_')) {
+    const paginationId = interaction.customId.replace('t_list_close_', '');
+    delete pagination[paginationId];
+    
+    await interaction.update({
+      content: '✅ Mappings list closed.',
       components: [],
     });
     return;
