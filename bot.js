@@ -1598,6 +1598,7 @@ async function handleGiveawayEnd(interaction) {
   }
 
   const winnerIds = await selectWinners(eligible, giveaway.num_winners, interaction.guildId);
+  console.log(`🎯 Manual END - Selected ${winnerIds.length} winners: ${JSON.stringify(winnerIds)}`);
   
   // Stop the update loop before editing
   if (updateLoops.has(interaction.guildId)) {
@@ -1609,6 +1610,7 @@ async function handleGiveawayEnd(interaction) {
     JSON.stringify(winnerIds),
     interaction.guildId,
   ]);
+  console.log(`💾 Saved to DB: initial_winners = ${JSON.stringify(winnerIds)}`);
 
   let winnerListText = '';
   let announcement = '\n**Giveaway Ended!**\n\n🎉 **Congratulations**\n';
@@ -1786,7 +1788,13 @@ async function handleGiveawayReroll(interaction) {
   const eligible = JSON.parse(giveaway.eligible_entrants || '[]');
   const initialWinners = JSON.parse(giveaway.initial_winners || '[]');
 
+  console.log(`🔄 REROLL - Eligible: ${eligible.length}, Initial winners: ${initialWinners.length}`);
+  console.log(`   Eligible list: ${JSON.stringify(eligible)}`);
+  console.log(`   Initial winners: ${JSON.stringify(initialWinners)}`);
+
   const availableForReroll = eligible.filter((id) => !initialWinners.includes(id));
+  console.log(`   Available for reroll: ${availableForReroll.length}`);
+  console.log(`   Available list: ${JSON.stringify(availableForReroll)}`);
 
   if (availableForReroll.length === 0) {
     return await interaction.reply({
@@ -4630,9 +4638,13 @@ embed.addFields(
 }
 
 async function selectWinners(entrants, count, guildId) {
+  console.log(`🎲 selectWinners - Input: ${entrants.length} entrants, picking ${count}`);
+  
   if (entrants.length === 0) return [];
 
   const validEntrants = entrants.filter(e => e); // Remove any falsy values
+  console.log(`   Valid entrants after filter: ${validEntrants.length}`);
+  
   const winners = [];
   const availableEntrants = [...validEntrants];
 
@@ -4641,13 +4653,14 @@ async function selectWinners(entrants, count, guildId) {
     const randomIndex = Math.floor(Math.random() * availableEntrants.length);
     const winner = availableEntrants[randomIndex];
     winners.push(winner);
+    console.log(`   Pick ${i + 1}: ${winner}`);
 
     // Remove from available for next selection
     availableEntrants.splice(randomIndex, 1);
   }
 
+  console.log(`   Final winners: ${JSON.stringify(winners)}`);
   return winners;
-}
 
 // ============================================================================
 // REGISTER SLASH COMMANDS
