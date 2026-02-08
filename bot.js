@@ -2158,7 +2158,12 @@ async function handleGiveawayCount(interaction) {
 
   // Sort by win count (descending)
   const sortedUsers = Object.entries(userStats)
-    .sort(([, a], [, b]) => b.wins - a.wins);
+    .sort(([, a], [, b]) => {
+      if (b.wins !== a.wins) {
+        return b.wins - a.wins;  // Sort by wins descending first
+      }
+      return b.entries - a.entries;  // Then by entries descending
+    });
 
   // Get usernames
   const guild = interaction.guild;
@@ -2173,7 +2178,7 @@ async function handleGiveawayCount(interaction) {
     let username = `<Unknown User ${userId}>`;
     try {
       const member = await guild.members.fetch(userId);
-      username = member.user.username;
+      username = member.displayName;
     } catch (err) {
       // Use default
     }
