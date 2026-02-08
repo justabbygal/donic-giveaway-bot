@@ -1597,7 +1597,8 @@ async function handleGiveawayEnd(interaction) {
     });
   }
 
-  const winnerIds = await selectWinners(eligible, giveaway.num_winners, interaction.guildId);
+  const boostedEligible = await applyFairnessBoost(eligible, interaction.guildId);
+  const winnerIds = await selectWinners(boostedEligible, giveaway.num_winners, interaction.guildId);
   console.log(`🎯 Manual END - Selected ${winnerIds.length} winners: ${JSON.stringify(winnerIds)}`);
   
   // Stop the update loop before editing
@@ -1809,7 +1810,8 @@ async function handleGiveawayReroll(interaction) {
   // Validate howMany doesn't exceed available entrants
   const numToReroll = Math.min(howMany, availableForReroll.length);
 
-  const winnerIds = await selectWinners(availableForReroll, numToReroll, interaction.guildId);
+  const boostedAvailable = await applyFairnessBoost(availableForReroll, interaction.guildId);
+  const winnerIds = await selectWinners(boostedAvailable, numToReroll, interaction.guildId);
   const channel = await client.channels.fetch(giveaway.channel_id);
 
   let announcement = `🎰 **Reroll Winners** (${numToReroll} of ${giveaway.num_winners}):\n\n`;
@@ -4427,7 +4429,8 @@ function startAutoEndTimer(guildId, endTime) {
         }
       } else {
         console.log(`🎉 Selecting ${giveaway.num_winners} winner(s) from ${eligible.length} eligible`);
-        const winnerIds = await selectWinners(eligible, giveaway.num_winners, guildId);
+        const boostedEligible = await applyFairnessBoost(eligible, guildId);
+        const winnerIds = await selectWinners(boostedEligible, giveaway.num_winners, guildId);
         try {
           const channel = await client.channels.fetch(giveaway.channel_id);
           console.log(`✓ Fetched channel: ${channel.id}`);
@@ -4640,6 +4643,44 @@ embed.addFields(
   } catch (error) {
     console.error('Failed to update message:', error);
   }
+}
+
+async function applyFairnessBoost(eligible, guildId) {
+  // Check for users with 29+ entries and 0 wins - give them 10% boost
+  const allGiveaways = await dbAll(
+    'SELECT initial_winners, eligible_entrants FROM giveaway_history WHERE guild_id = $1',
+    [guildId]
+  );
+
+  const userWins = {};
+  const userEntries = {};
+
+  // Count from history
+  for (const giveaway of allGiveaways) {
+    const entries = JSON.parse(giveaway.eligible_entrants || '[]');
+    for (const id of entries) {
+      userEntries[id] = (userEntries[id] || 0) + 1;
+    }
+
+    const winners = JSON.parse(giveaway.initial_winners || '[]');
+    for (const id of winners) {
+      userWins[id] = (userWins[id] || 0) + 1;
+    }
+  }
+
+  // Apply boost for unlucky users
+  const boosted = [...eligible];
+  for (const userId of eligible) {
+    const wins = userWins[userId] || 0;
+    const entries = userEntries[userId] || 0;
+    
+    if (entries >= 29 && wins === 0) {
+      boosted.push(userId);
+      console.log(`✨ FAIRNESS BOOST: ${userId} (${entries} entries, 0 wins) +99%`);
+    }
+  }
+
+  return boosted;
 }
 
 async function selectWinners(entrants, count, guildId) {
