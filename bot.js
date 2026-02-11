@@ -3764,9 +3764,9 @@ async function handleModal(interaction) {
       }
     }
 
-    // Validate: Minimum XP must be integer only
+    // Validate: Minimum XP must allow decimals (up to hundredths)
     if (minXpInput.trim() !== '') {
-      if (!/^\d+$/.test(minXpInput.trim())) {
+      if (!/^\d+(\.\d{1,2})?$/.test(minXpInput.trim())) {
         const retryId = `modal_retry_${interaction.user.id}_${Date.now()}`;
         failedModalSubmissions.set(retryId, {
           customId: interaction.customId,
@@ -3783,7 +3783,7 @@ async function handleModal(interaction) {
           .setStyle(ButtonStyle.Primary);
 
         await interaction.editReply({
-          content: '❌ **Minimum XP must be a whole number** (in thousands). Example: 10 means 10k XP',
+          content: '❌ **Minimum XP must be a number** (in thousands). Decimals OK up to hundredths. Example: 10 or 10.25 means 10k or 10.25k XP',
           components: [new ActionRowBuilder().addComponents(retryButton)],
         });
         
