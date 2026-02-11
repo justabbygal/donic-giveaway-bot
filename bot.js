@@ -206,7 +206,7 @@ async function initializeDatabase() {
         duration TEXT,
         num_winners INTEGER,
         auto_check INTEGER,
-        min_xp INTEGER,
+        min_xp DECIMAL(10,2),
         amount REAL,
         currency TEXT,
         tiers TEXT,
@@ -233,7 +233,7 @@ async function initializeDatabase() {
         channel_id TEXT NOT NULL,
         message_id TEXT,
         giveaway_type TEXT NOT NULL,
-        min_xp INTEGER NOT NULL,
+        min_xp DECIMAL(10,2) NOT NULL,
         additional_requirements TEXT,
         amount REAL,
         currency TEXT,
@@ -257,7 +257,7 @@ async function initializeDatabase() {
         channel_id TEXT NOT NULL,
         message_id TEXT,
         giveaway_type TEXT NOT NULL,
-        min_xp INTEGER NOT NULL,
+        min_xp DECIMAL(10,2) NOT NULL,
         additional_requirements TEXT,
         amount REAL,
         currency TEXT,
@@ -893,7 +893,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_min_xp')
     .setLabel('Minimum XP in thousands')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('Whole number in thousands. Example: 10 means 10k XP')
+    .setPlaceholder('Number in thousands (decimals OK). Example: 10 or 10.25 means 10k/10.25k XP')
     .setRequired(false)
     .setValue(previousValues.minXp || '');
 
@@ -1259,7 +1259,7 @@ async function handleGiveawayQuickStart(interaction) {
     const duration = parseInt(template.duration) || 2;
     const numWinners = parseInt(template.num_winners) || 1;
     const autoCheck = template.auto_check === 1 ? 1 : 0;
-    const minXp = parseInt(template.min_xp) || 0;
+    const minXp = parseFloat(template.min_xp) || 0;
     const amount = template.amount ? parseFloat(template.amount) : null;
     const currency = template.currency || 'CAD';
     const withMember = template.with_member || null;
@@ -1475,7 +1475,7 @@ embed.addFields(
     .setCustomId('gw_min_xp')
     .setLabel('Minimum XP in thousands')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('Whole number in thousands. Example: 10 means 10k XP')
+    .setPlaceholder('Number in thousands (decimals OK). Example: 10 or 10.25 means 10k/10.25k XP')
     .setRequired(false);
 
   const otherReqInput = new TextInputBuilder()
@@ -3641,7 +3641,7 @@ async function handleModal(interaction) {
 
     const withMember = withMemberStr.trim() ? withMemberStr.trim() : null;
     const amount = amountStr.trim() ? parseFloat(amountStr) : null;
-    const minXp = minXpStr.trim() ? parseInt(minXpStr) : 0;
+    const minXp = minXpStr.trim() ? parseFloat(minXpStr) : 0;
 
     // Check if this is an edit or create
     if (stepData.isEditing && stepData.originalTemplateId) {
@@ -3867,7 +3867,7 @@ async function handleModal(interaction) {
     }
 
     const amount = amountInput.trim() === '' ? null : parseFloat(amountInput);
-    const minXp = minXpInput.trim() === '' ? 0 : parseInt(minXpInput);
+    const minXp = minXpInput.trim() === '' ? 0 : parseFloat(minXpInput);
 
     const channel = interaction.channel;
 
@@ -4676,7 +4676,7 @@ async function applyFairnessBoost(eligible, guildId) {
     
     if (entries >= 29 && wins === 0) {
       boosted.push(userId);
-      console.log(`✨ FAIRNESS BOOST: ${userId} (${entries} entries, 0 wins) +99%`);
+      console.log(`✨ FAIRNESS BOOST: ${userId} (${entries} entries, 0 wins) +10%`);
     }
   }
 
