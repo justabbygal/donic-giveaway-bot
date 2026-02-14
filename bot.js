@@ -3078,14 +3078,25 @@ async function handleButton(interaction) {
     const guildId = parts[2];
     const userId = parts[3];
 
+    console.log(`🚪 [LEAVE] User <@${userId}> (${userId}) is attempting to leave giveaway in guild ${guildId}`);
+
     const giveaway = await dbGet(
       'SELECT * FROM active_giveaway WHERE guild_id = $1',
       [guildId]
     );
 
+    // Block leaving if giveaway has ended (no active giveaway or timer expired)
     if (!giveaway) {
+      console.log(`🚪 [LEAVE] BLOCKED - No active giveaway found (already ended). User ${userId} stays in.`);
       return await interaction.editReply({
-        content: '❌ No active giveaway.',
+        content: '🔒 This giveaway has already ended — you cannot leave after it has ended.',
+      });
+    }
+
+    if (giveaway.ends_at && Date.now() >= Number(giveaway.ends_at)) {
+      console.log(`🚪 [LEAVE] BLOCKED - Giveaway timer has expired (ends_at: ${giveaway.ends_at}). User ${userId} stays in.`);
+      return await interaction.editReply({
+        content: '🔒 This giveaway has already ended — you cannot leave after it has ended.',
       });
     }
 
@@ -3095,13 +3106,18 @@ async function handleButton(interaction) {
     // Remove user from both lists
     const eligibleIndex = eligible.indexOf(userId);
     const ineligibleIndex = ineligible.indexOf(userId);
+    let removedFrom = 'neither list';
 
     if (eligibleIndex > -1) {
       eligible.splice(eligibleIndex, 1);
+      removedFrom = 'eligible';
     }
     if (ineligibleIndex > -1) {
       ineligible.splice(ineligibleIndex, 1);
+      removedFrom = removedFrom === 'eligible' ? 'both eligible and ineligible' : 'ineligible';
     }
+
+    console.log(`🚪 [LEAVE] SUCCESS - User <@${userId}> (${userId}) left the giveaway. Removed from: ${removedFrom}. Eligible now: ${eligible.length}, Ineligible now: ${ineligible.length}`);
 
     // Update database
     await dbRun(
