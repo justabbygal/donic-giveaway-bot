@@ -4692,7 +4692,7 @@ async function applyFairnessBoost(eligible, guildId) {
     
     if (entries >= 100 && wins <= 5) {
       boosted.push(userId);
-      console.log(`✨ FAIRNESS BOOST: ${userId} (${entries} entries, 0 wins) +99%`);
+      console.log(`✨ FAIRNESS BOOST: ${userId} (${entries} entries, 0 wins) +5%`);
     }
   }
 
