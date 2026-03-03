@@ -244,6 +244,7 @@ async function initializeDatabase() {
         eligible_entrants TEXT NOT NULL DEFAULT '[]',
         ineligible_entrants TEXT NOT NULL DEFAULT '[]',
         initial_winners TEXT NOT NULL DEFAULT '[]',
+        left_entrants TEXT NOT NULL DEFAULT '[]',
         started_at BIGINT NOT NULL,
         duration_minutes INTEGER,
         ends_at BIGINT
@@ -268,6 +269,7 @@ async function initializeDatabase() {
         eligible_entrants TEXT NOT NULL DEFAULT '[]',
         ineligible_entrants TEXT NOT NULL DEFAULT '[]',
         initial_winners TEXT NOT NULL DEFAULT '[]',
+        left_entrants TEXT NOT NULL DEFAULT '[]',
         started_at BIGINT NOT NULL,
         duration_minutes INTEGER,
         ends_at BIGINT
@@ -285,6 +287,14 @@ async function initializeDatabase() {
         PRIMARY KEY (guild_id, discord_user_id)
       )
     `);
+
+    // Migration: add left_entrants column if it doesn't exist
+    try {
+      await client.query(`ALTER TABLE active_giveaway ADD COLUMN IF NOT EXISTS left_entrants TEXT NOT NULL DEFAULT '[]'`);
+      await client.query(`ALTER TABLE giveaway_history ADD COLUMN IF NOT EXISTS left_entrants TEXT NOT NULL DEFAULT '[]'`);
+    } catch (migrationErr) {
+      console.log('Migration note (left_entrants):', migrationErr.message);
+    }
 
     console.log('✅ Database tables initialized');
   } catch (err) {
@@ -444,6 +454,8 @@ async function handleCommand(interaction) {
       await handleGiveawayCount(interaction);
     } else if (subcommand === 'entrants') {
       await handleGiveawayEntrants(interaction);
+    } else if (subcommand === 'left') {
+      await handleGiveawayLeft(interaction);
     }
   }
 
@@ -1365,8 +1377,8 @@ embed.addFields(
     
     if (existingGiveaway) {
       await dbRun(
-        `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+        `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, left_entrants, started_at, duration_minutes, ends_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
         [
           existingGiveaway.guild_id,
           existingGiveaway.channel_id,
@@ -1383,6 +1395,7 @@ embed.addFields(
           existingGiveaway.eligible_entrants,
           existingGiveaway.ineligible_entrants,
           existingGiveaway.initial_winners,
+          existingGiveaway.left_entrants || '[]',
           existingGiveaway.started_at,
           existingGiveaway.duration_minutes,
           existingGiveaway.ends_at,
@@ -1395,8 +1408,8 @@ embed.addFields(
 
     await dbRun(
       `INSERT INTO active_giveaway 
-       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, left_entrants, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
       [
         interaction.guildId,
         channel.id,
@@ -1410,6 +1423,7 @@ embed.addFields(
         interaction.user.id,
         withMember,
         numWinners,
+        '[]',
         '[]',
         '[]',
         '[]',
@@ -1517,8 +1531,8 @@ async function handleGiveawayEnd(interaction) {
   if (eligible.length === 0) {
     // Save to history before deleting
     await dbRun(
-      `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+      `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, left_entrants, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
       [
         giveaway.guild_id,
         giveaway.channel_id,
@@ -1535,6 +1549,7 @@ async function handleGiveawayEnd(interaction) {
         giveaway.eligible_entrants,
         giveaway.ineligible_entrants,
         giveaway.initial_winners,
+        giveaway.left_entrants || '[]',
         giveaway.started_at,
         giveaway.duration_minutes,
         giveaway.ends_at,
@@ -1682,8 +1697,8 @@ async function handleGiveawayEnd(interaction) {
   if (updatedGiveaway) {
     // Save to history before deleting
     await dbRun(
-      `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+      `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, left_entrants, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
       [
         updatedGiveaway.guild_id,
         updatedGiveaway.channel_id,
@@ -1700,6 +1715,7 @@ async function handleGiveawayEnd(interaction) {
         updatedGiveaway.eligible_entrants,
         updatedGiveaway.ineligible_entrants,
         updatedGiveaway.initial_winners,
+        updatedGiveaway.left_entrants || '[]',
         updatedGiveaway.started_at,
         updatedGiveaway.duration_minutes,
         updatedGiveaway.ends_at,
@@ -1731,8 +1747,8 @@ async function handleGiveawayCancel(interaction) {
 
   // Save to history before deleting
   await dbRun(
-    `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+    `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, left_entrants, started_at, duration_minutes, ends_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
     [
       giveaway.guild_id,
       giveaway.channel_id,
@@ -1749,6 +1765,7 @@ async function handleGiveawayCancel(interaction) {
       giveaway.eligible_entrants,
       giveaway.ineligible_entrants,
       giveaway.initial_winners,
+      giveaway.left_entrants || '[]',
       giveaway.started_at,
       giveaway.duration_minutes,
       giveaway.ends_at,
@@ -1952,8 +1969,8 @@ async function handleGiveawayRunback(interaction) {
       
       if (existingGiveaway) {
         await dbRun(
-          `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+          `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, left_entrants, started_at, duration_minutes, ends_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
           [
             existingGiveaway.guild_id,
             existingGiveaway.channel_id,
@@ -1970,6 +1987,7 @@ async function handleGiveawayRunback(interaction) {
             existingGiveaway.eligible_entrants,
             existingGiveaway.ineligible_entrants,
             existingGiveaway.initial_winners,
+            existingGiveaway.left_entrants || '[]',
             existingGiveaway.started_at,
             existingGiveaway.duration_minutes,
             existingGiveaway.ends_at,
@@ -2059,8 +2077,8 @@ async function handleGiveawayRunback(interaction) {
 
       // Store in database
       await dbRun(
-        `INSERT INTO active_giveaway (guild_id, channel_id, message_id, giveaway_type, min_xp, amount, currency, with_member, additional_requirements, num_winners, auto_check, hosted_by, started_at, ends_at, duration_minutes, eligible_entrants, ineligible_entrants, initial_winners)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, '[]', '[]', '[]')`,
+        `INSERT INTO active_giveaway (guild_id, channel_id, message_id, giveaway_type, min_xp, amount, currency, with_member, additional_requirements, num_winners, auto_check, hosted_by, started_at, ends_at, duration_minutes, eligible_entrants, ineligible_entrants, initial_winners, left_entrants)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, '[]', '[]', '[]', '[]')`,
         [
           interaction.guildId,
           interaction.channelId,
@@ -2294,6 +2312,92 @@ async function handleGiveawayEntrants(interaction) {
     // Create multiple messages if needed
     entrantsText = entrantList.join('\n');
     message = `✅ **Eligible Entrants** (${entrantList.length} total)\n\n${entrantsText}`;
+  }
+
+  await interaction.editReply({
+    content: message,
+  });
+}
+
+// ============================================================================
+// HANDLE: /gw left - Show who left the most recent giveaway
+// ============================================================================
+async function handleGiveawayLeft(interaction) {
+  await interaction.deferReply({ flags: 64 }); // Ephemeral reply
+
+  // Check active giveaway first, then fall back to history
+  let leftEntrantsRaw = null;
+  let source = '';
+
+  const activeGiveaway = await dbGet(
+    'SELECT left_entrants FROM active_giveaway WHERE guild_id = $1',
+    [interaction.guildId]
+  );
+
+  if (activeGiveaway && activeGiveaway.left_entrants) {
+    leftEntrantsRaw = activeGiveaway.left_entrants;
+    source = 'active';
+  } else {
+    const recentGiveaway = await dbGet(
+      'SELECT left_entrants FROM giveaway_history WHERE guild_id = $1 ORDER BY ends_at DESC LIMIT 1',
+      [interaction.guildId]
+    );
+    if (recentGiveaway && recentGiveaway.left_entrants) {
+      leftEntrantsRaw = recentGiveaway.left_entrants;
+      source = 'history';
+    }
+  }
+
+  if (!leftEntrantsRaw) {
+    return await interaction.editReply({
+      content: '❌ No giveaway data found.',
+    });
+  }
+
+  let leftIds = [];
+  try {
+    leftIds = JSON.parse(leftEntrantsRaw);
+  } catch (err) {
+    console.error('Failed to parse left_entrants:', err);
+    return await interaction.editReply({
+      content: '❌ Error retrieving left entrants.',
+    });
+  }
+
+  if (leftIds.length === 0) {
+    return await interaction.editReply({
+      content: source === 'active'
+        ? '✅ No one has left the current giveaway.'
+        : '✅ No one left the most recent giveaway.',
+    });
+  }
+
+  // Convert user IDs to Discord display names
+  const guild = interaction.guild;
+  const leftList = [];
+
+  for (const userId of leftIds) {
+    try {
+      const member = await guild.members.fetch(userId);
+      leftList.push(member.displayName);
+    } catch (err) {
+      leftList.push(`<Unknown User ${userId}>`);
+    }
+  }
+
+  // Sort alphabetically
+  leftList.sort();
+
+  const leftText = leftList.map((name, idx) => `${idx + 1}. ${name}`).join('\n');
+  const header = source === 'active'
+    ? `🚪 **Users Who Left Current Giveaway** (${leftList.length} total)`
+    : `🚪 **Users Who Left Most Recent Giveaway** (${leftList.length} total)`;
+
+  let message = `${header}\n\n${leftText}`;
+
+  // Truncate if over Discord limit
+  if (message.length > 2000) {
+    message = message.substring(0, 1990) + '\n...';
   }
 
   await interaction.editReply({
@@ -3117,12 +3221,18 @@ async function handleButton(interaction) {
       removedFrom = removedFrom === 'eligible' ? 'both eligible and ineligible' : 'ineligible';
     }
 
-    console.log(`🚪 [LEAVE] SUCCESS - User <@${userId}> (${userId}) left the giveaway. Removed from: ${removedFrom}. Eligible now: ${eligible.length}, Ineligible now: ${ineligible.length}`);
+    // Track this user in left_entrants
+    const leftEntrants = JSON.parse(giveaway.left_entrants || '[]');
+    if (!leftEntrants.includes(userId)) {
+      leftEntrants.push(userId);
+    }
+
+    console.log(`🚪 [LEAVE] SUCCESS - User <@${userId}> (${userId}) left the giveaway. Removed from: ${removedFrom}. Eligible now: ${eligible.length}, Ineligible now: ${ineligible.length}. Total left: ${leftEntrants.length}`);
 
     // Update database
     await dbRun(
-      'UPDATE active_giveaway SET eligible_entrants = $1, ineligible_entrants = $2 WHERE guild_id = $3',
-      [JSON.stringify(eligible), JSON.stringify(ineligible), guildId]
+      'UPDATE active_giveaway SET eligible_entrants = $1, ineligible_entrants = $2, left_entrants = $3 WHERE guild_id = $4',
+      [JSON.stringify(eligible), JSON.stringify(ineligible), JSON.stringify(leftEntrants), guildId]
     );
 
     // Update the giveaway message
@@ -3989,8 +4099,8 @@ embed.addFields(
     
     if (existingGiveaway) {
       await dbRun(
-        `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+        `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, left_entrants, started_at, duration_minutes, ends_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
         [
           existingGiveaway.guild_id,
           existingGiveaway.channel_id,
@@ -4007,6 +4117,7 @@ embed.addFields(
           existingGiveaway.eligible_entrants,
           existingGiveaway.ineligible_entrants,
           existingGiveaway.initial_winners,
+          existingGiveaway.left_entrants || '[]',
           existingGiveaway.started_at,
           existingGiveaway.duration_minutes,
           existingGiveaway.ends_at,
@@ -4019,8 +4130,8 @@ embed.addFields(
 
     await dbRun(
       `INSERT INTO active_giveaway 
-       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+       (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, left_entrants, started_at, duration_minutes, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
       [
         interaction.guildId,
         channel.id,
@@ -4034,6 +4145,7 @@ embed.addFields(
         interaction.user.id,
         withMember,
         numWinners,
+        '[]',
         '[]',
         '[]',
         '[]',
@@ -4383,8 +4495,8 @@ function startAutoEndTimer(guildId, endTime) {
         
         // Save to history before deleting
         await dbRun(
-          `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+          `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, left_entrants, started_at, duration_minutes, ends_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
           [
             giveaway.guild_id,
             giveaway.channel_id,
@@ -4401,6 +4513,7 @@ function startAutoEndTimer(guildId, endTime) {
             giveaway.eligible_entrants,
             giveaway.ineligible_entrants,
             giveaway.initial_winners,
+            giveaway.left_entrants || '[]',
             giveaway.started_at,
             giveaway.duration_minutes,
             giveaway.ends_at,
@@ -4508,8 +4621,8 @@ function startAutoEndTimer(guildId, endTime) {
           if (updatedGiveaway) {
             // Save to history before deleting
             await dbRun(
-              `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, started_at, duration_minutes, ends_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+              `INSERT INTO giveaway_history (guild_id, channel_id, message_id, giveaway_type, min_xp, additional_requirements, amount, currency, auto_check, hosted_by, with_member, num_winners, eligible_entrants, ineligible_entrants, initial_winners, left_entrants, started_at, duration_minutes, ends_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
               [
                 updatedGiveaway.guild_id,
                 updatedGiveaway.channel_id,
@@ -4526,6 +4639,7 @@ function startAutoEndTimer(guildId, endTime) {
                 updatedGiveaway.eligible_entrants,
                 updatedGiveaway.ineligible_entrants,
                 updatedGiveaway.initial_winners,
+                updatedGiveaway.left_entrants || '[]',
                 updatedGiveaway.started_at,
                 updatedGiveaway.duration_minutes,
                 updatedGiveaway.ends_at,
@@ -4851,6 +4965,11 @@ function getCommands() {
           type: 1,
           name: 'entrants',
           description: 'View eligible entrants from the most recent giveaway',
+        },
+        {
+          type: 1,
+          name: 'left',
+          description: 'View users who left the most recent giveaway',
         },
       ],
     },
