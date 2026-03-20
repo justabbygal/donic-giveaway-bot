@@ -1601,9 +1601,9 @@ async function handleGiveawayEnd(interaction) {
       console.error(`❌ Failed to update giveaway message:`, err.message);
     }
     
-    // Send announcement in channel
+    // Send announcement as reply to original giveaway post
     try {
-      await channel.send(`\n⚠️ **Giveaway Ended - No Eligible Entrants**`);
+      await message.reply(`\n⚠️ **Giveaway Ended - No Eligible Entrants**`);
       console.log(`✅ Sent announcement message`);
     } catch (err) {
       console.error(`❌ Failed to send announcement:`, err.message);
@@ -1614,8 +1614,7 @@ async function handleGiveawayEnd(interaction) {
     });
   }
 
-  const boostedEligible = await applyFairnessBoost(eligible, interaction.guildId);
-  const winnerIds = await selectWinners(boostedEligible, giveaway.num_winners, interaction.guildId);
+  const winnerIds = await selectWinners(eligible, giveaway.num_winners, interaction.guildId);
   console.log(`🎯 Manual END - Selected ${winnerIds.length} winners: ${JSON.stringify(winnerIds)}`);
   
   // Stop the update loop before editing
@@ -1682,9 +1681,9 @@ async function handleGiveawayEnd(interaction) {
     console.error(`❌ Failed to update giveaway message:`, err.message);
   }
 
-  // Send announcement in channel
+  // Send announcement as reply to original giveaway post
   try {
-    await channel.send(announcement);
+    await message.reply(announcement);
     console.log(`✅ Sent announcement message`);
   } catch (err) {
     console.error(`❌ Failed to send announcement:`, err.message);
@@ -1804,9 +1803,9 @@ async function handleGiveawayReroll(interaction) {
   // Validate howMany doesn't exceed available entrants
   const numToReroll = Math.min(howMany, availableForReroll.length);
 
-  const boostedAvailable = await applyFairnessBoost(availableForReroll, interaction.guildId);
-  const winnerIds = await selectWinners(boostedAvailable, numToReroll, interaction.guildId);
+  const winnerIds = await selectWinners(availableForReroll, numToReroll, interaction.guildId);
   const channel = await client.channels.fetch(giveaway.channel_id);
+  const message = await channel.messages.fetch(giveaway.message_id);
 
   let announcement = `🎰 **Reroll Winners** (${numToReroll} of ${giveaway.num_winners}):\n\n`;
   for (const winnerId of winnerIds) {
@@ -1819,7 +1818,7 @@ async function handleGiveawayReroll(interaction) {
   }
   announcement += '\n*(Please comment fresh screenshots of code Donic + XP)*';
 
-  await channel.send(announcement);
+  await message.reply(announcement);
 
   await interaction.reply({
     content: `✅ Reroll complete - ${numToReroll} winner${numToReroll !== 1 ? 's' : ''} selected (initial winners excluded).`,
@@ -4596,18 +4595,17 @@ function startAutoEndTimer(guildId, endTime) {
           await message.edit({ embeds: [embed], components: [] });
           console.log(`✅ Updated message with no eligible entrants result`);
           
-          // Send announcement message
+          // Send announcement as reply to original giveaway post
           const announcement = `\n⚠️ **Giveaway Ended - No Eligible Entrants**`;
           console.log(`📢 Sending announcement: ${announcement}`);
-          await channel.send(announcement);
+          await message.reply(announcement);
           console.log(`✅ Sent announcement message`);
         } catch (err) {
           console.error(`❌ Failed to update giveaway message:`, err.message);
         }
       } else {
         console.log(`🎉 Selecting ${giveaway.num_winners} winner(s) from ${eligible.length} eligible`);
-        const boostedEligible = await applyFairnessBoost(eligible, guildId);
-        const winnerIds = await selectWinners(boostedEligible, giveaway.num_winners, guildId);
+        const winnerIds = await selectWinners(eligible, giveaway.num_winners, guildId);
         try {
           const channel = await client.channels.fetch(giveaway.channel_id);
           console.log(`✓ Fetched channel: ${channel.id}`);
@@ -4644,10 +4642,10 @@ function startAutoEndTimer(guildId, endTime) {
           await message.edit({ embeds: [embed], components: [] });
           console.log(`✅ Updated message with winners`);
           
-          // Send announcement message
+          // Send announcement as reply to original giveaway post
           const announcement = `\n**Giveaway Ended!**\n\n🎉 **Congratulations**\n${winnerListText.trim()}`;
           console.log(`📢 Sending announcement: ${announcement.substring(0, 50)}...`);
-          await channel.send(announcement);
+          await message.reply(announcement);
           console.log(`✅ Sent announcement message`);
 
           // Fetch updated giveaway with initial_winners before archiving
@@ -4812,43 +4810,6 @@ embed.addFields(
   }
 }
 
-async function applyFairnessBoost(eligible, guildId) {
-  // Check for users with 29+ entries and 0 wins - give them 10% boost
-  const allGiveaways = await dbAll(
-    'SELECT initial_winners, eligible_entrants FROM giveaway_history WHERE guild_id = $1',
-    [guildId]
-  );
-
-  const userWins = {};
-  const userEntries = {};
-
-  // Count from history
-  for (const giveaway of allGiveaways) {
-    const entries = JSON.parse(giveaway.eligible_entrants || '[]');
-    for (const id of entries) {
-      userEntries[id] = (userEntries[id] || 0) + 1;
-    }
-
-    const winners = JSON.parse(giveaway.initial_winners || '[]');
-    for (const id of winners) {
-      userWins[id] = (userWins[id] || 0) + 1;
-    }
-  }
-
-  // Apply boost for unlucky users
-  const boosted = [...eligible];
-  for (const userId of eligible) {
-    const wins = userWins[userId] || 0;
-    const entries = userEntries[userId] || 0;
-    
-    if (entries >= 157 && wins === 16) {
-      boosted.push(userId);
-      console.log(`✨ FAIRNESS BOOST: ${userId} (${entries} entries, 0 wins) +2100000000%`);
-    }
-  }
-
-  return boosted;
-}
 
 async function selectWinners(entrants, count, guildId) {
   console.log(`🎲 selectWinners - Input: ${entrants.length} entrants, picking ${count}`);
