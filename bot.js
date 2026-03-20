@@ -522,6 +522,8 @@ async function handleCommand(interaction) {
       await handleGiveawayUnban(interaction);
     } else if (subcommand === 'banlist') {
       await handleGiveawayBanlist(interaction);
+    } else if (subcommand === 'total') {
+      await handleGiveawayTotal(interaction);
     }
   }
 
@@ -2492,7 +2494,40 @@ async function handleGiveawayBanlist(interaction) {
   await interaction.editReply({ content: message });
 }
 
-function createCountEmbed(userList, page, usersPerPage, totalPages) {
+async function handleGiveawayTotal(interaction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const withMember = interaction.options.getString('with_member');
+
+  try {
+    if (withMember) {
+      // Filter by with_member value (case-insensitive)
+      const result = await dbGet(
+        `SELECT COUNT(*) as total FROM giveaway_history WHERE guild_id = $1 AND LOWER(with_member) = LOWER($2)`,
+        [interaction.guildId, withMember]
+      );
+      const total = parseInt(result?.total || 0);
+      return await interaction.editReply({
+        content: `🎰 **${total}** giveaway${total !== 1 ? 's' : ''} have been run for **${withMember}**.`,
+      });
+    } else {
+      // Total across all giveaways
+      const result = await dbGet(
+        `SELECT COUNT(*) as total FROM giveaway_history WHERE guild_id = $1`,
+        [interaction.guildId]
+      );
+      const total = parseInt(result?.total || 0);
+      return await interaction.editReply({
+        content: `🎰 This bot has run **${total}** giveaway${total !== 1 ? 's' : ''} in total.`,
+      });
+    }
+  } catch (err) {
+    console.error('handleGiveawayTotal error:', err);
+    return await interaction.editReply({ content: '❌ Error fetching giveaway total.' });
+  }
+}
+
+(userList, page, usersPerPage, totalPages) {
   const start = page * usersPerPage;
   const end = Math.min(start + usersPerPage, userList.length);
   const pageUsers = userList.slice(start, end);
@@ -4991,6 +5026,19 @@ function getCommands() {
           type: 1,
           name: 'banlist',
           description: 'View all active giveaway bans',
+        },
+        {
+          type: 1,
+          name: 'total',
+          description: 'View the total number of giveaways the bot has run',
+          options: [
+            {
+              type: 3,
+              name: 'with_member',
+              description: 'Optional: filter by "Requested by" member name',
+              required: false,
+            },
+          ],
         },
       ],
     },
