@@ -2527,7 +2527,7 @@ async function handleGiveawayTotal(interaction) {
   }
 }
 
-(userList, page, usersPerPage, totalPages) {
+function createCountEmbed(userList, page, usersPerPage, totalPages) {
   const start = page * usersPerPage;
   const end = Math.min(start + usersPerPage, userList.length);
   const pageUsers = userList.slice(start, end);
