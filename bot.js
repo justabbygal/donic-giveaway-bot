@@ -666,6 +666,16 @@ async function handleCommand(interaction) {
       await handleXpView(interaction);
     }
   }
+
+  if (commandName === 'setup') {
+    const sub = interaction.options.getSubcommand();
+    const isBotOwner = interaction.user.id === BOT_OWNER_ID;
+    if (!isBotOwner && !await isAdminOrBot(interaction.member, interaction.guildId)) {
+      return await interaction.reply({ content: '❌ You need Admin or Giveaway Managers role to use /setup.', flags: 64 });
+    }
+    if (sub === 'view') return await handleSetupView(interaction);
+    if (sub === 'configure') return await handleSetupConfigure(interaction);
+  }
 }
 
 // ============================================================================
@@ -3836,6 +3846,10 @@ async function handleSelectMenu(interaction) {
 // ============================================================================
 
 async function handleModal(interaction) {
+  if (interaction.customId === 'setup_modal') {
+    return await handleSetupModalSubmit(interaction);
+  }
+
   if (interaction.customId.startsWith('defaults_modal_')) {
     try {
       await interaction.deferReply({ flags: 64 });
