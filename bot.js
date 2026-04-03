@@ -12,19 +12,17 @@ const {
 } = require('discord.js');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
-const axios = require('axios');
 
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
 }
-console.log('All env vars:', Object.keys(process.env).slice(0, 10));
 // ============================================================================
 // DATABASE SETUP
 // ============================================================================
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : false,
 })
 
 pool.on('error', (err) => {
@@ -34,23 +32,35 @@ pool.on('error', (err) => {
 // ============================================================================
 // THRILL SERVICE PLACEHOLDER
 // ============================================================================
-// Placeholder for when Thrill API is unavailable
-const thrillService = {
+// Placeholder for when Casino API is unavailable
+const casinoService = {
   async lookupUserByUsername(username) {
     try {
-      // If Thrill API is configured, use it here
+      // If Casino API is configured, use it here
       // For now, return API_DOWN to trigger manual check fallback
       return {
         status: 'API_DOWN',
       };
     } catch (err) {
-      console.error('Thrill service error:', err);
+      console.error('Casino service error:', err);
       return {
         status: 'API_DOWN',
       };
     }
   },
 };
+
+// ============================================================================
+// SERVER CONFIGURATION
+// ============================================================================
+// Role names — set these in .env to match your server's actual role names
+const ROLE_ADMIN = process.env.ROLE_ADMIN || 'Admin';
+const ROLE_GIVEAWAY_MANAGERS = process.env.ROLE_GIVEAWAY_MANAGERS || 'Giveaway Managers';
+const ROLE_VERIFIED = process.env.ROLE_VERIFIED || 'Verified';
+
+// URL shown to banned users so they can open a support ticket
+// Set SUPPORT_CHANNEL_URL in .env to your server's ticket channel link
+const SUPPORT_CHANNEL_URL = process.env.SUPPORT_CHANNEL_URL || '';
 
 // ============================================================================
 // ROLE CHECKING HELPERS
@@ -62,12 +72,12 @@ function hasRole(member, roleName) {
 
 function isAdminOrBot(member) {
   if (!member) return false;
-  return hasRole(member, 'Admin') || hasRole(member, 'Giveaway Managers');
+  return hasRole(member, ROLE_ADMIN) || hasRole(member, ROLE_GIVEAWAY_MANAGERS);
 }
 
 function isVerified(member) {
   if (!member) return false;
-  return hasRole(member, 'Verified');
+  return hasRole(member, ROLE_VERIFIED);
 }
 
 // ============================================================================
@@ -78,6 +88,9 @@ const pagination = {}; // { paginationId: { userList, currentPage, totalPages, u
 // ============================================================================
 // SPECIAL USER MESSAGES
 // ============================================================================
+// Bot owner — can run any command on any server regardless of roles
+const BOT_OWNER_ID = '944830904034033725';
+
 const SPECIAL_USERS = {
   LYNCHY9595: '1055569375530319937',
   FROCKKNOCK: '504260096914882564',
@@ -174,19 +187,70 @@ async function initializeDatabase() {
   try {
     await client.query(`
       CREATE TABLE IF NOT EXISTS user_map (
-        discord_user_id TEXT PRIMARY KEY,
-        thrill_username TEXT NOT NULL,
-        updated_at BIGINT NOT NULL
+        guild_id TEXT NOT NULL,
+        discord_user_id TEXT NOT NULL,
+        casino_username TEXT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (guild_id, discord_user_id)
       )
     `);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS eligibility_cache (
-        thrill_username TEXT PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        casino_username TEXT NOT NULL,
         last_xp INTEGER,
         last_under_donic INTEGER,
-        last_checked_at BIGINT NOT NULL
+        last_checked_at BIGINT NOT NULL,
+        PRIMARY KEY (guild_id, casino_username)
       )
+    `);
+
+    // Migration: add guild_id to user_map if upgrading from older schema (v1 → v2)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='user_map' AND column_name='guild_id') THEN
+          ALTER TABLE user_map ADD COLUMN guild_id TEXT NOT NULL DEFAULT 'legacy';
+          ALTER TABLE user_map DROP CONSTRAINT IF EXISTS user_map_pkey;
+          ALTER TABLE user_map ADD PRIMARY KEY (guild_id, discord_user_id);
+        END IF;
+      END$$;
+    `);
+
+    // Migration: add guild_id to eligibility_cache and rename column (v1 → v2)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='eligibility_cache' AND column_name='guild_id') THEN
+          ALTER TABLE eligibility_cache ADD COLUMN guild_id TEXT NOT NULL DEFAULT 'legacy';
+          ALTER TABLE eligibility_cache DROP CONSTRAINT IF EXISTS eligibility_cache_pkey;
+          ALTER TABLE eligibility_cache RENAME COLUMN thrill_username TO casino_username;
+          ALTER TABLE eligibility_cache ADD PRIMARY KEY (guild_id, casino_username);
+        END IF;
+      END$$;
+    `);
+
+    // Migration: rename thrill_username → casino_username in user_map (v2 → v3)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='user_map' AND column_name='thrill_username') THEN
+          ALTER TABLE user_map RENAME COLUMN thrill_username TO casino_username;
+        END IF;
+      END$$;
+    `);
+
+    // Migration: rename thrill_username → casino_username in eligibility_cache (v2 → v3)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='eligibility_cache' AND column_name='thrill_username') THEN
+          ALTER TABLE eligibility_cache DROP CONSTRAINT IF EXISTS eligibility_cache_pkey;
+          ALTER TABLE eligibility_cache RENAME COLUMN thrill_username TO casino_username;
+          ALTER TABLE eligibility_cache ADD PRIMARY KEY (guild_id, casino_username);
+        END IF;
+      END$$;
     `);
 
     await client.query(`
@@ -467,7 +531,7 @@ client.on('interactionCreate', async (interaction) => {
 async function handleCommand(interaction) {
   const { commandName } = interaction;
   const member = interaction.member;
-  const hasGwModRole = member?.roles.cache.some(role => role.name === 'Giveaway Managers');
+  const hasGwModRole = member?.roles.cache.some(role => role.name === ROLE_GIVEAWAY_MANAGERS);
   const isAdmin = member?.permissions.has('Administrator');
 
   if (commandName === 'gw') {
@@ -545,11 +609,11 @@ async function handleCommand(interaction) {
   }
 
   if (commandName === 'gwcheck') {
-    const thrillName = interaction.options.getString('thrillname');
+    const casinoName = interaction.options.getString('casinoname');
     const user = interaction.options.getUser('user');
 
-    if (thrillName) {
-      await handleManualCheckByThrill(interaction, thrillName);
+    if (casinoName) {
+      await handleManualCheckByCasino(interaction, casinoName);
     } else if (user) {
       await handleManualCheckByUser(interaction, user);
     }
@@ -674,15 +738,15 @@ async function handleXpView(interaction) {
       [guildId, targetUser.id]
     );
 
-    // Get Thrill username from mapping
+    // Get Casino username from mapping
     const mapped = await dbGet(
-      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
-      [targetUser.id]
+      'SELECT casino_username FROM user_map WHERE guild_id = $1 AND discord_user_id = $2',
+      [guildId, targetUser.id]
     );
 
     const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
     const displayName = targetMember?.displayName || targetUser.username;
-    const thrillUsername = mapped?.thrill_username || 'Not linked';
+    const casinoUsername = mapped?.casino_username || 'Not linked';
 
     if (!record) {
       return await interaction.reply({
@@ -695,7 +759,7 @@ async function handleXpView(interaction) {
     const editorName = record.edited_by_name || 'Unknown';
     const displayXp = formatXpOutput(record.xp);
 
-    const message = `**${displayName}**\n\n• Thrill: ${thrillUsername}\n• XP: ${displayXp}\n• XP Date: <t:${timestamp}:F>\n• Verified by: ${editorName}`;
+    const message = `**${displayName}**\n\n• Casino: ${casinoUsername}\n• XP: ${displayXp}\n• XP Date: <t:${timestamp}:F>\n• Verified by: ${editorName}`;
 
     await interaction.reply({
       content: message,
@@ -717,7 +781,7 @@ async function handleXpView(interaction) {
 async function handleMapLink(interaction) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
   const targetUser = interaction.options.getUser('user');
-  const thrillUsername = interaction.options.getString('thrill_username');
+  const casinoUsername = interaction.options.getString('casino_username');
 
   // Check permissions
   const isAdmin = isAdminOrBot(member);
@@ -745,15 +809,16 @@ async function handleMapLink(interaction) {
   }
 
   // Link the user
+  const guildId = interaction.guildId;
   await dbRun(
-    `INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (discord_user_id) DO UPDATE SET thrill_username = EXCLUDED.thrill_username, updated_at = EXCLUDED.updated_at`,
-    [targetUser.id, thrillUsername, Date.now()]
+    `INSERT INTO user_map (guild_id, discord_user_id, casino_username, updated_at)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (guild_id, discord_user_id) DO UPDATE SET casino_username = EXCLUDED.casino_username, updated_at = EXCLUDED.updated_at`,
+    [guildId, targetUser.id, casinoUsername, Date.now()]
   );
 
   await interaction.reply({
-    content: `✅ Linked <@${targetUser.id}> to **${thrillUsername}**`,
+    content: `✅ Linked <@${targetUser.id}> to **${casinoUsername}**`,
     flags: 64,
   });
 }
@@ -761,7 +826,7 @@ async function handleMapLink(interaction) {
 async function handleMapEdit(interaction) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
   const targetUser = interaction.options.getUser('user');
-  const newThrillUsername = interaction.options.getString('new_thrill_username');
+  const newCasinoUsername = interaction.options.getString('new_casino_username');
 
   // Check permissions
   const isAdmin = isAdminOrBot(member);
@@ -784,9 +849,10 @@ async function handleMapEdit(interaction) {
     }
   }
 
+  const guildId = interaction.guildId;
   const existing = await dbGet(
-    'SELECT * FROM user_map WHERE discord_user_id = $1',
-    [targetUser.id]
+    'SELECT * FROM user_map WHERE guild_id = $1 AND discord_user_id = $2',
+    [guildId, targetUser.id]
   );
 
   if (!existing) {
@@ -797,12 +863,12 @@ async function handleMapEdit(interaction) {
   }
 
   await dbRun(
-    `UPDATE user_map SET thrill_username = $1, updated_at = $2 WHERE discord_user_id = $3`,
-    [newThrillUsername, Date.now(), targetUser.id]
+    `UPDATE user_map SET casino_username = $1, updated_at = $2 WHERE guild_id = $3 AND discord_user_id = $4`,
+    [newCasinoUsername, Date.now(), guildId, targetUser.id]
   );
 
   await interaction.reply({
-    content: `✅ Updated <@${targetUser.id}> mapping from **${existing.thrill_username}** to **${newThrillUsername}**`,
+    content: `✅ Updated <@${targetUser.id}> mapping from **${existing.casino_username}** to **${newCasinoUsername}**`,
     flags: 64,
   });
 }
@@ -819,9 +885,10 @@ async function handleMapDelete(interaction) {
     });
   }
 
+  const guildId = interaction.guildId;
   const existing = await dbGet(
-    'SELECT * FROM user_map WHERE discord_user_id = $1',
-    [user.id]
+    'SELECT * FROM user_map WHERE guild_id = $1 AND discord_user_id = $2',
+    [guildId, user.id]
   );
 
   if (!existing) {
@@ -831,10 +898,10 @@ async function handleMapDelete(interaction) {
     });
   }
 
-  await dbRun('DELETE FROM user_map WHERE discord_user_id = $1', [user.id]);
+  await dbRun('DELETE FROM user_map WHERE guild_id = $1 AND discord_user_id = $2', [guildId, user.id]);
 
   await interaction.reply({
-    content: `✅ Deleted mapping for <@${user.id}> (**${existing.thrill_username}**)`,
+    content: `✅ Deleted mapping for <@${user.id}> (**${existing.casino_username}**)`,
     flags: 64,
   });
 }
@@ -850,7 +917,7 @@ async function handleMapList(interaction) {
     });
   }
 
-  const mappings = await dbAll('SELECT * FROM user_map ORDER BY updated_at DESC');
+  const mappings = await dbAll('SELECT * FROM user_map WHERE guild_id = $1 ORDER BY updated_at DESC', [interaction.guildId]);
 
   if (mappings.length === 0) {
     return await interaction.reply({
@@ -915,8 +982,8 @@ async function handleMapLookup(interaction) {
   }
 
   const mapping = await dbGet(
-    'SELECT * FROM user_map WHERE discord_user_id = $1',
-    [user.id]
+    'SELECT * FROM user_map WHERE guild_id = $1 AND discord_user_id = $2',
+    [interaction.guildId, user.id]
   );
 
   if (!mapping) {
@@ -927,7 +994,7 @@ async function handleMapLookup(interaction) {
   }
 
   await interaction.reply({
-    content: `<@${user.id}> → **${mapping.thrill_username}**`,
+    content: `<@${user.id}> → **${mapping.casino_username}**`,
     flags: 64,
   });
 }
@@ -1636,12 +1703,12 @@ async function handleGiveawayEnd(interaction) {
 
   for (const winnerId of winnerIds) {
     const userMap = await dbGet(
-      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
-      [winnerId]
+      'SELECT casino_username FROM user_map WHERE guild_id = $1 AND discord_user_id = $2',
+      [interaction.guildId, winnerId]
     );
 
-    const thrillUsername = userMap?.thrill_username || 'Not linked';
-    let winnerText = `<@${winnerId}> -- Thrill: ${thrillUsername}`;
+    const casinoUsername = userMap?.casino_username || 'Not linked';
+    let winnerText = `<@${winnerId}> -- Casino: ${casinoUsername}`;
 
     winnerListText += winnerText + '\n';
     announcement += winnerText + '\n';
@@ -1812,11 +1879,11 @@ async function handleGiveawayReroll(interaction) {
   let announcement = `🎰 **Reroll Winners** (${numToReroll} of ${giveaway.num_winners}):\n\n`;
   for (const winnerId of winnerIds) {
     const userMap = await dbGet(
-      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
-      [winnerId]
+      'SELECT casino_username FROM user_map WHERE guild_id = $1 AND discord_user_id = $2',
+      [interaction.guildId, winnerId]
     );
-    const thrillUsername = userMap?.thrill_username || 'Not linked';
-    announcement += `<@${winnerId}> -- Thrill: ${thrillUsername}\n`;
+    const casinoUsername = userMap?.casino_username || 'Not linked';
+    announcement += `<@${winnerId}> -- Casino: ${casinoUsername}\n`;
   }
   announcement += '\n*(Please comment fresh screenshots of code Donic + XP)*';
 
@@ -2343,9 +2410,10 @@ async function handleGiveawayLeft(interaction) {
 async function handleGiveawayBan(interaction) {
   await interaction.deferReply({ flags: 64 });
 
-  const BAN_AUTHORIZED = [SPECIAL_USERS.LYNCHY9595, SPECIAL_USERS.FROCKKNOCK, SPECIAL_USERS.ANHEDONIC];
-  if (!BAN_AUTHORIZED.includes(interaction.user.id)) {
-    return await interaction.editReply({ content: '❌ Only Lynchy, FrockKnock, or Anhedonic can use this command. Please reach out to one of them if you need someone banned from a giveaway.' });
+  const member = interaction.guild?.members.cache.get(interaction.user.id)
+    || await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
+  if (!hasRole(member, ROLE_ADMIN)) {
+    return await interaction.editReply({ content: `❌ Only members with the **${ROLE_ADMIN}** role can ban users from giveaways.` });
   }
 
   const targetUser = interaction.options.getUser('user');
@@ -2396,9 +2464,10 @@ async function handleGiveawayBan(interaction) {
 async function handleGiveawayUnban(interaction) {
   await interaction.deferReply({ flags: 64 });
 
-  const BAN_AUTHORIZED = [SPECIAL_USERS.LYNCHY9595, SPECIAL_USERS.FROCKKNOCK, SPECIAL_USERS.ANHEDONIC];
-  if (!BAN_AUTHORIZED.includes(interaction.user.id)) {
-    return await interaction.editReply({ content: '❌ Only Lynchy, FrockKnock, or Anhedonic can use this command. Please reach out to one of them if you need someone banned from a giveaway.' });
+  const member = interaction.guild?.members.cache.get(interaction.user.id)
+    || await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
+  if (!hasRole(member, ROLE_ADMIN)) {
+    return await interaction.editReply({ content: `❌ Only members with the **${ROLE_ADMIN}** role can unban users from giveaways.` });
   }
 
   const targetUser = interaction.options.getUser('user');
@@ -2556,7 +2625,7 @@ function createMapListContent(mappings, page, mappingsPerPage, totalPages) {
 
   let content = '**User Mappings:**\n';
   for (const m of pageMappings) {
-    content += `• <@${m.discord_user_id}> → **${m.thrill_username}**\n`;
+    content += `• <@${m.discord_user_id}> → **${m.casino_username}**\n`;
   }
 
   content += `\n_Page ${page + 1} of ${totalPages} • Total mappings: ${mappings.length}_`;
@@ -2884,7 +2953,7 @@ async function handleDefaultsSet(interaction) {
   await interaction.showModal(modal);
 }
 
-async function handleManualCheckByThrill(interaction, thrillName) {
+async function handleManualCheckByCasino(interaction, casinoName) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
   
   // Check permissions - only Admin or Giveaway Managers
@@ -2895,7 +2964,7 @@ async function handleManualCheckByThrill(interaction, thrillName) {
     });
   }
 
-  const result = await checkEligibility(thrillName, 0);
+  const result = await checkEligibility(casinoName, 0, interaction.guildId);
 
   if (result.requiresManualCheck) {
     return await interaction.reply({
@@ -2912,7 +2981,7 @@ async function handleManualCheckByThrill(interaction, thrillName) {
   }
 
   await interaction.reply({
-    content: `✅ **${thrillName}** | XP: ${formatXP(result.xp)} | Under donic: ${result.underDonic ? 'Yes' : 'No'}`,
+    content: `✅ **${casinoName}** | XP: ${formatXP(result.xp)} | Under donic: ${result.underDonic ? 'Yes' : 'No'}`,
     flags: 64,
   });
 }
@@ -2929,18 +2998,18 @@ async function handleManualCheckByUser(interaction, user) {
   }
 
   const mapped = await dbGet(
-    'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
-    [user.id]
+    'SELECT casino_username FROM user_map WHERE guild_id = $1 AND discord_user_id = $2',
+    [interaction.guildId, user.id]
   );
 
   if (!mapped) {
     return await interaction.reply({
-      content: `❌ No Thrill username mapped for <@${user.id}>.`,
+      content: `❌ No Casino username mapped for <@${user.id}>.`,
       flags: 64,
     });
   }
 
-  const result = await checkEligibility(mapped.thrill_username, 0);
+  const result = await checkEligibility(mapped.casino_username, 0, interaction.guildId);
 
   if (result.requiresManualCheck) {
     return await interaction.reply({
@@ -2957,7 +3026,7 @@ async function handleManualCheckByUser(interaction, user) {
   }
 
   await interaction.reply({
-    content: `✅ <@${user.id}> (**${mapped.thrill_username}**) | XP: ${formatXP(result.xp)} | Under donic: ${result.underDonic ? 'Yes' : 'No'}`,
+    content: `✅ <@${user.id}> (**${mapped.casino_username}**) | XP: ${formatXP(result.xp)} | Under donic: ${result.underDonic ? 'Yes' : 'No'}`,
     flags: 64,
   });
 }
@@ -3216,7 +3285,7 @@ async function handleButton(interaction) {
       const timeLeft = Number(banRecord.expires_at) - Date.now();
       const remaining = formatTimeRemaining(timeLeft);
       return await interaction.editReply({
-        content: `\u{1F6AB} You have been banned from entering giveaways for **${banRecord.ban_days} day${banRecord.ban_days === 1 ? '' : 's'}**.\n\nYou have **${remaining}** remaining until you can enter again.\n\nIf you have questions, please open a ticket: https://discord.com/channels/1414675644750626910/1420165530374901810`,
+        content: `\u{1F6AB} You have been banned from entering giveaways for **${banRecord.ban_days} day${banRecord.ban_days === 1 ? '' : 's'}**.\n\nYou have **${remaining}** remaining until you can enter again.${SUPPORT_CHANNEL_URL ? `\n\nIf you have questions, please open a ticket: ${SUPPORT_CHANNEL_URL}` : ''}`,
       });
     }
 
@@ -3249,27 +3318,28 @@ async function handleButton(interaction) {
     }
 
     const mapped = await dbGet(
-      'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
-      [interaction.user.id]
+      'SELECT casino_username FROM user_map WHERE guild_id = $1 AND discord_user_id = $2',
+      [interaction.guildId, interaction.user.id]
     );
 
-    // If no Thrill mapping, show link prompt
+    // If no Casino mapping, show link prompt
     if (!mapped) {
       const linkButton = new ButtonBuilder()
-        .setCustomId(`link_thrill_${interaction.guildId}`)
-        .setLabel('Submit Thrill username')
+        .setCustomId(`link_casino_${interaction.guildId}`)
+        .setLabel('Submit Casino username')
         .setStyle(ButtonStyle.Primary);
 
       return await interaction.editReply({
-        content: `**Link your Thrill**\n\nClick the button below to provide your Thrill username.\nThis is a one-time step and won't be required for future giveaways. Once submitted, you'll be entered.\n\n⚠️ MUST BE UNDER CODE DONIC ⚠️`,
+        content: `**Link your Casino**\n\nClick the button below to provide your Casino username.\nThis is a one-time step and won't be required for future giveaways. Once submitted, you'll be entered.\n\n⚠️ MUST BE UNDER CODE DONIC ⚠️`,
         components: [new ActionRowBuilder().addComponents(linkButton)],
       });
     }
 
     if (giveaway.auto_check && mapped) {
       const result = await checkEligibility(
-        mapped.thrill_username,
-        giveaway.min_xp
+        mapped.casino_username,
+        giveaway.min_xp,
+        interaction.guildId
       );
 
       if (result.requiresManualCheck) {
@@ -3401,19 +3471,19 @@ async function handleButton(interaction) {
     });
   }
 
-  // ===== LINK THRILL BUTTON HANDLER =====
-  if (interaction.customId.startsWith('link_thrill_')) {
-    const guildId = interaction.customId.replace('link_thrill_', '');
+  // ===== LINK CASINO BUTTON HANDLER =====
+  if (interaction.customId.startsWith('link_casino_')) {
+    const guildId = interaction.customId.replace('link_casino_', '');
 
     const modal = new ModalBuilder()
-      .setCustomId(`submit_thrill_username_${guildId}`)
-      .setTitle('Link your Thrill Username');
+      .setCustomId(`submit_casino_username_${guildId}`)
+      .setTitle('Link your Casino Username');
 
     const usernameInput = new TextInputBuilder()
-      .setCustomId('thrill_username')
-      .setLabel('Thrill Username')
+      .setCustomId('casino_username')
+      .setLabel('Casino Username')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('Enter your Thrill username')
+      .setPlaceholder('Enter your Casino username')
       .setRequired(true)
       .setMinLength(1)
       .setMaxLength(50);
@@ -4283,27 +4353,27 @@ embed.addFields(
     startAutoEndTimer(interaction.guildId, endTime);
   }
 
-  // ===== SUBMIT THRILL USERNAME MODAL HANDLER =====
-  if (interaction.customId.startsWith('submit_thrill_username_')) {
+  // ===== SUBMIT CASINO USERNAME MODAL HANDLER =====
+  if (interaction.customId.startsWith('submit_casino_username_')) {
     await interaction.deferReply({ flags: 64 });
 
-    const guildId = interaction.customId.replace('submit_thrill_username_', '');
-    const thrillUsername = interaction.fields.getTextInputValue('thrill_username')?.trim();
+    const guildId = interaction.customId.replace('submit_casino_username_', '');
+    const casinoUsername = interaction.fields.getTextInputValue('casino_username')?.trim();
 
-    if (!thrillUsername) {
+    if (!casinoUsername) {
       return await interaction.editReply({
-        content: '❌ Please enter a Thrill username.',
+        content: '❌ Please enter a Casino username.',
       });
     }
 
     try {
-      // Store the Thrill username mapping
+      // Store the Casino username mapping
       await dbRun(
-        `INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (discord_user_id)
-         DO UPDATE SET thrill_username = $2, updated_at = $3`,
-        [interaction.user.id, thrillUsername, Date.now()]
+        `INSERT INTO user_map (guild_id, discord_user_id, casino_username, updated_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (guild_id, discord_user_id)
+         DO UPDATE SET casino_username = $3, updated_at = $4`,
+        [guildId, interaction.user.id, casinoUsername, Date.now()]
       );
 
       // Get the active giveaway
@@ -4314,7 +4384,7 @@ embed.addFields(
 
       if (!giveaway) {
         return await interaction.editReply({
-          content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!`,
+          content: `✅ Casino name **${casinoUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!`,
         });
       }
 
@@ -4324,13 +4394,13 @@ embed.addFields(
       // Check if already entered
       if (eligible.includes(interaction.user.id) || ineligible.includes(interaction.user.id)) {
         return await interaction.editReply({
-          content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n✅ You already entered.`,
+          content: `✅ Casino name **${casinoUsername}** has been captured successfully.\n\n✅ You already entered.`,
         });
       }
 
       // Check eligibility if auto_check is enabled
       if (giveaway.auto_check) {
-        const result = await checkEligibility(thrillUsername, giveaway.min_xp);
+        const result = await checkEligibility(casinoUsername, giveaway.min_xp, guildId);
 
         if (result.requiresManualCheck) {
           eligible.push(interaction.user.id);
@@ -4341,7 +4411,7 @@ embed.addFields(
           await updateGiveawayMessage(guildId);
 
           return await interaction.editReply({
-            content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code Donic + XP** if you win.`,
+            content: `✅ Casino name **${casinoUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code Donic + XP** if you win.`,
           });
         }
 
@@ -4354,7 +4424,7 @@ embed.addFields(
           await updateGiveawayMessage(guildId);
 
           return await interaction.editReply({
-            content: `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n❌ ${result.reason}`,
+            content: `✅ Casino name **${casinoUsername}** has been captured successfully.\n\n❌ ${result.reason}`,
           });
         }
       }
@@ -4369,7 +4439,7 @@ embed.addFields(
       await updateGiveawayMessage(guildId);
 
       const specialMessage = getSpecialEntryMessage(interaction.user.id);
-      let confirmationContent = `✅ Thrill name **${thrillUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!`;
+      let confirmationContent = `✅ Casino name **${casinoUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!`;
       if (specialMessage) {
         confirmationContent += `\n\n${specialMessage}`;
       }
@@ -4378,9 +4448,9 @@ embed.addFields(
         content: confirmationContent,
       });
     } catch (err) {
-      console.error('Error submitting Thrill username:', err);
+      console.error('Error submitting Casino username:', err);
       await interaction.editReply({
-        content: '❌ Error saving Thrill username.',
+        content: '❌ Error saving Casino username.',
       });
     }
   }
@@ -4405,28 +4475,29 @@ client.on('messageCreate', async (message) => {
   if (message.channelId !== giveawayChannel.id) return;
 
   const mapped = await dbGet(
-    'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
-    [message.author.id]
+    'SELECT casino_username FROM user_map WHERE guild_id = $1 AND discord_user_id = $2',
+    [message.guildId, message.author.id]
   );
 
   if (!mapped) {
-    const thrillUsername = message.content.trim();
+    const casinoUsername = message.content.trim();
 
-    if (!thrillUsername || thrillUsername.length < 1) {
+    if (!casinoUsername || casinoUsername.length < 1) {
       return;
     }
 
     await dbRun(
-`INSERT INTO user_map (discord_user_id, thrill_username, updated_at)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (discord_user_id) DO UPDATE SET thrill_username = EXCLUDED.thrill_username, updated_at = EXCLUDED.updated_at`,
-      [message.author.id, thrillUsername, Date.now()]
+`INSERT INTO user_map (guild_id, discord_user_id, casino_username, updated_at)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (guild_id, discord_user_id) DO UPDATE SET casino_username = EXCLUDED.casino_username, updated_at = EXCLUDED.updated_at`,
+      [message.guildId, message.author.id, casinoUsername, Date.now()]
     );
 
     if (giveaway.auto_check) {
       const eligibilityResult = await checkEligibility(
-        thrillUsername,
-        giveaway.min_xp
+        casinoUsername,
+        giveaway.min_xp,
+        message.guildId
       );
 
       const eligible = JSON.parse(giveaway.eligible_entrants || '[]');
@@ -4489,10 +4560,10 @@ client.on('messageCreate', async (message) => {
 // ELIGIBILITY CHECK
 // ============================================================================
 
-async function checkEligibility(thrillUsername, minXp) {
+async function checkEligibility(casinoUsername, minXp, guildId) {
   const cached = await dbGet(
-    'SELECT * FROM eligibility_cache WHERE thrill_username = $1',
-    [thrillUsername]
+    'SELECT * FROM eligibility_cache WHERE guild_id = $1 AND casino_username = $2',
+    [guildId, casinoUsername]
   );
 
   let xp = cached?.last_xp || 0;
@@ -4507,7 +4578,7 @@ async function checkEligibility(thrillUsername, minXp) {
     };
   }
 
-  const apiResult = await thrillService.lookupUserByUsername(thrillUsername);
+  const apiResult = await casinoService.lookupUserByUsername(casinoUsername);
 
   if (apiResult.status === 'NOT_FOUND') {
     return {
@@ -4531,11 +4602,11 @@ async function checkEligibility(thrillUsername, minXp) {
   underDonic = apiResult.underDonic;
 
   await dbRun(
-    `INSERT INTO eligibility_cache 
-     (thrill_username, last_xp, last_under_donic, last_checked_at)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (thrill_username) DO UPDATE SET last_xp = EXCLUDED.last_xp, last_under_donic = EXCLUDED.last_under_donic, last_checked_at = EXCLUDED.last_checked_at`,
-    [thrillUsername, xp, underDonic ? 1 : 0, Date.now()]
+    `INSERT INTO eligibility_cache
+     (guild_id, casino_username, last_xp, last_under_donic, last_checked_at)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (guild_id, casino_username) DO UPDATE SET last_xp = EXCLUDED.last_xp, last_under_donic = EXCLUDED.last_under_donic, last_checked_at = EXCLUDED.last_checked_at`,
+    [guildId, casinoUsername, xp, underDonic ? 1 : 0, Date.now()]
   );
 
   const blocked = xp < minXp || !underDonic;
@@ -4656,12 +4727,12 @@ function startAutoEndTimer(guildId, endTime) {
 
           for (const winnerId of winnerIds) {
             const userMap = await dbGet(
-              'SELECT thrill_username FROM user_map WHERE discord_user_id = $1',
-              [winnerId]
+              'SELECT casino_username FROM user_map WHERE guild_id = $1 AND discord_user_id = $2',
+              [guildId, winnerId]
             );
 
-            const thrillUsername = userMap?.thrill_username || 'Not linked';
-            let winnerText = `<@${winnerId}> -- Thrill: ${thrillUsername}`;
+            const casinoUsername = userMap?.casino_username || 'Not linked';
+            let winnerText = `<@${winnerId}> -- Casino: ${casinoUsername}`;
 
             winnerListText += winnerText + '\n';
           }
@@ -5044,16 +5115,16 @@ function getCommands() {
     },
     {
       name: 't',
-      description: 'Manage Discord ↔ Thrill username mappings',
+      description: 'Manage Discord ↔ Casino username mappings',
       defaultMemberPermissions: null,
       options: [
         {
           type: 1,
           name: 'link',
-          description: 'Link a Discord user to a Thrill username',
+          description: 'Link a Discord user to a Casino username',
           options: [
             { type: 6, name: 'user', description: 'Discord user', required: true },
-            { type: 3, name: 'thrill_username', description: 'Thrill username', required: true },
+            { type: 3, name: 'casino_username', description: 'Casino username', required: true },
           ],
         },
         {
@@ -5062,7 +5133,7 @@ function getCommands() {
           description: 'Edit an existing mapping',
           options: [
             { type: 6, name: 'user', description: 'Discord user', required: true },
-            { type: 3, name: 'new_thrill_username', description: 'New Thrill username', required: true },
+            { type: 3, name: 'new_casino_username', description: 'New Casino username', required: true },
           ],
         },
         {
@@ -5088,7 +5159,7 @@ function getCommands() {
       name: 'gwcheck',
       description: 'Manually check user eligibility',
       options: [
-        { type: 3, name: 'thrillname', description: 'Thrill username', required: false },
+        { type: 3, name: 'casinoname', description: 'Casino username', required: false },
         { type: 6, name: 'user', description: 'Discord user', required: false },
       ],
     },
@@ -5144,5 +5215,4 @@ client.once('ready', async () => {
 // ============================================================================
 // LOGIN
 // ============================================================================
-console.log('Token value:', process.env.DISCORD_TOKEN);
 client.login(process.env.DISCORD_TOKEN);
