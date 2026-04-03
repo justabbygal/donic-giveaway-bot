@@ -5286,6 +5286,125 @@ client.once('ready', async () => {
 });
 
 // ============================================================================
+// HANDLE: /setup view
+// ============================================================================
+async function handleSetupView(interaction) {
+  const config = await getServerConfig(interaction.guildId);
+
+  const lines = [
+    '**Bot Configuration for this Server:**',
+    `Admin role: \`${config.roleAdmin}\``,
+    `Giveaway Managers role: \`${config.roleGiveawayManagers}\``,
+    `Verified role: \`${config.roleVerified}\``,
+    `Giveaway Manager Role ID: ${config.giveawayManagerRoleId || '_not set_'}`,
+    `Support channel URL: ${config.supportChannelUrl || '_not set_'}`,
+    '',
+    '_Run `/setup configure` to change these values._',
+  ];
+
+  await interaction.reply({ content: lines.join('\n'), flags: 64 });
+}
+
+// ============================================================================
+// HANDLE: /setup configure
+// ============================================================================
+async function handleSetupConfigure(interaction) {
+  const config = await getServerConfig(interaction.guildId);
+
+  const modal = new ModalBuilder()
+    .setCustomId('setup_modal')
+    .setTitle('Bot Server Configuration');
+
+  const adminRoleInput = new TextInputBuilder()
+    .setCustomId('role_admin')
+    .setLabel('Admin role name')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('Admin')
+    .setRequired(false)
+    .setValue(config.roleAdmin);
+
+  const gwManagersInput = new TextInputBuilder()
+    .setCustomId('role_giveaway_managers')
+    .setLabel('Giveaway Managers role name')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('Giveaway Managers')
+    .setRequired(false)
+    .setValue(config.roleGiveawayManagers);
+
+  const verifiedInput = new TextInputBuilder()
+    .setCustomId('role_verified')
+    .setLabel('Verified role name')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('Verified')
+    .setRequired(false)
+    .setValue(config.roleVerified);
+
+  const roleIdInput = new TextInputBuilder()
+    .setCustomId('giveaway_manager_role_id')
+    .setLabel('Giveaway Manager Role ID')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('Right-click role → Copy Role ID')
+    .setRequired(false)
+    .setValue(config.giveawayManagerRoleId);
+
+  const supportUrlInput = new TextInputBuilder()
+    .setCustomId('support_channel_url')
+    .setLabel('Support channel URL (for ban messages)')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('https://discord.com/channels/...')
+    .setRequired(false)
+    .setValue(config.supportChannelUrl);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(adminRoleInput),
+    new ActionRowBuilder().addComponents(gwManagersInput),
+    new ActionRowBuilder().addComponents(verifiedInput),
+    new ActionRowBuilder().addComponents(roleIdInput),
+    new ActionRowBuilder().addComponents(supportUrlInput),
+  );
+
+  await interaction.showModal(modal);
+}
+
+// ============================================================================
+// HANDLE: setup_modal submission
+// ============================================================================
+async function handleSetupModalSubmit(interaction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const roleAdmin            = interaction.fields.getTextInputValue('role_admin').trim();
+  const roleGiveawayManagers = interaction.fields.getTextInputValue('role_giveaway_managers').trim();
+  const roleVerified         = interaction.fields.getTextInputValue('role_verified').trim();
+  const giveawayManagerRoleId = interaction.fields.getTextInputValue('giveaway_manager_role_id').trim();
+  const supportChannelUrl    = interaction.fields.getTextInputValue('support_channel_url').trim();
+
+  await dbRun(
+    `INSERT INTO server_settings (guild_id, role_admin, role_giveaway_managers, role_verified, giveaway_manager_role_id, support_channel_url)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (guild_id) DO UPDATE SET
+       role_admin = EXCLUDED.role_admin,
+       role_giveaway_managers = EXCLUDED.role_giveaway_managers,
+       role_verified = EXCLUDED.role_verified,
+       giveaway_manager_role_id = EXCLUDED.giveaway_manager_role_id,
+       support_channel_url = EXCLUDED.support_channel_url`,
+    [interaction.guildId, roleAdmin || null, roleGiveawayManagers || null, roleVerified || null, giveawayManagerRoleId || null, supportChannelUrl || null]
+  );
+
+  invalidateServerConfig(interaction.guildId);
+
+  await interaction.editReply({
+    content: [
+      '✅ **Server configuration saved.**',
+      `Admin role: \`${roleAdmin || '(default)'}\``,
+      `Giveaway Managers role: \`${roleGiveawayManagers || '(default)'}\``,
+      `Verified role: \`${roleVerified || '(default)'}\``,
+      `Giveaway Manager Role ID: ${giveawayManagerRoleId || '_not set_'}`,
+      `Support channel URL: ${supportChannelUrl || '_not set_'}`,
+    ].join('\n'),
+  });
+}
+
+// ============================================================================
 // LOGIN
 // ============================================================================
 client.login(process.env.DISCORD_TOKEN);
