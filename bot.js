@@ -53,14 +53,33 @@ const casinoService = {
 // ============================================================================
 // SERVER CONFIGURATION
 // ============================================================================
-// Role names — set these in .env to match your server's actual role names
-const ROLE_ADMIN = process.env.ROLE_ADMIN || 'Admin';
-const ROLE_GIVEAWAY_MANAGERS = process.env.ROLE_GIVEAWAY_MANAGERS || 'Giveaway Managers';
-const ROLE_VERIFIED = process.env.ROLE_VERIFIED || 'Verified';
+// Per-guild config cache — avoids a DB hit on every role check
+const _configCache = new Map(); // guildId -> { config, fetchedAt }
+const _CONFIG_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-// URL shown to banned users so they can open a support ticket
-// Set SUPPORT_CHANNEL_URL in .env to your server's ticket channel link
-const SUPPORT_CHANNEL_URL = process.env.SUPPORT_CHANNEL_URL || '';
+async function getServerConfig(guildId) {
+  const cached = _configCache.get(guildId);
+  if (cached && Date.now() - cached.fetchedAt < _CONFIG_TTL_MS) {
+    return cached.config;
+  }
+  const settings = await dbGet(
+    'SELECT * FROM server_settings WHERE guild_id = $1',
+    [guildId]
+  );
+  const config = {
+    roleAdmin:             settings?.role_admin              || process.env.ROLE_ADMIN              || 'Admin',
+    roleGiveawayManagers:  settings?.role_giveaway_managers  || process.env.ROLE_GIVEAWAY_MANAGERS  || 'Giveaway Managers',
+    roleVerified:          settings?.role_verified           || process.env.ROLE_VERIFIED           || 'Verified',
+    supportChannelUrl:     settings?.support_channel_url     || process.env.SUPPORT_CHANNEL_URL     || '',
+    giveawayManagerRoleId: settings?.giveaway_manager_role_id || process.env.GIVEAWAY_MANAGER_ROLE_ID || '',
+  };
+  _configCache.set(guildId, { config, fetchedAt: Date.now() });
+  return config;
+}
+
+function invalidateServerConfig(guildId) {
+  _configCache.delete(guildId);
+}
 
 // ============================================================================
 // ROLE CHECKING HELPERS
