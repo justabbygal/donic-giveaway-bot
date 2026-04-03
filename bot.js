@@ -565,9 +565,41 @@ client.on('interactionCreate', async (interaction) => {
 // COMMAND HANDLER
 // ============================================================================
 
+function buildCommandString(interaction) {
+  let cmd = `/${interaction.commandName}`;
+  try {
+    const group = interaction.options.getSubcommandGroup(false);
+    const sub = interaction.options.getSubcommand(false);
+    if (group) cmd += ` ${group}`;
+    if (sub) cmd += ` ${sub}`;
+  } catch (_) {}
+  return cmd;
+}
+
 async function handleCommand(interaction) {
   const { commandName } = interaction;
   const member = interaction.member;
+
+  // If this server has never been configured, intercept and prompt setup
+  if (commandName !== 'setup') {
+    const existingSettings = await dbGet(
+      'SELECT guild_id FROM server_settings WHERE guild_id = $1',
+      [interaction.guildId]
+    );
+    if (!existingSettings) {
+      const isBotOwner = interaction.user.id === BOT_OWNER_ID;
+      const isAdmin = await isAdminOrBot(member, interaction.guildId);
+      if (isBotOwner || isAdmin) {
+        return await handleSetupConfigure(interaction, buildCommandString(interaction));
+      } else {
+        return await interaction.reply({
+          content: '⚙️ This bot hasn\'t been configured yet for this server. Please ask an admin to run `/setup configure`.',
+          flags: 64,
+        });
+      }
+    }
+  }
+
   const config = await getServerConfig(interaction.guildId);
   const hasGwModRole = interaction.user.id === BOT_OWNER_ID || member?.roles.cache.some(role => role.name === config.roleGiveawayManagers);
   const isAdmin = member?.permissions.has('Administrator');
@@ -3846,7 +3878,7 @@ async function handleSelectMenu(interaction) {
 // ============================================================================
 
 async function handleModal(interaction) {
-  if (interaction.customId === 'setup_modal') {
+  if (interaction.customId.startsWith('setup_modal')) {
     return await handleSetupModalSubmit(interaction);
   }
 
@@ -5308,11 +5340,12 @@ async function handleSetupView(interaction) {
 // ============================================================================
 // HANDLE: /setup configure
 // ============================================================================
-async function handleSetupConfigure(interaction) {
+async function handleSetupConfigure(interaction, originalCommand = null) {
   const config = await getServerConfig(interaction.guildId);
+  const customId = originalCommand ? `setup_modal|${originalCommand}` : 'setup_modal';
 
   const modal = new ModalBuilder()
-    .setCustomId('setup_modal')
+    .setCustomId(customId)
     .setTitle('Bot Server Configuration');
 
   const adminRoleInput = new TextInputBuilder()
@@ -5392,6 +5425,8 @@ async function handleSetupModalSubmit(interaction) {
 
   invalidateServerConfig(interaction.guildId);
 
+  const originalCommand = interaction.customId.includes('|') ? interaction.customId.split('|')[1] : null;
+
   await interaction.editReply({
     content: [
       '✅ **Server configuration saved.**',
@@ -5400,7 +5435,8 @@ async function handleSetupModalSubmit(interaction) {
       `Verified role: \`${roleVerified || '(default)'}\``,
       `Giveaway Manager Role ID: ${giveawayManagerRoleId || '_not set_'}`,
       `Support channel URL: ${supportChannelUrl || '_not set_'}`,
-    ].join('\n'),
+      originalCommand ? `\nYou can now run \`${originalCommand}\` again.` : '',
+    ].filter(Boolean).join('\n'),
   });
 }
 
