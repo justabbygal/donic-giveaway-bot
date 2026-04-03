@@ -89,14 +89,18 @@ function hasRole(member, roleName) {
   return member.roles.cache.some(role => role.name === roleName);
 }
 
-function isAdminOrBot(member) {
-  if (!member) return false;
-  return hasRole(member, ROLE_ADMIN) || hasRole(member, ROLE_GIVEAWAY_MANAGERS);
+async function isAdminOrBot(member, guildId) {
+  if (!member || !guildId) return false;
+  if ((member.id ?? member.user?.id) === BOT_OWNER_ID) return true;
+  const config = await getServerConfig(guildId);
+  return hasRole(member, config.roleAdmin) || hasRole(member, config.roleGiveawayManagers);
 }
 
-function isVerified(member) {
-  if (!member) return false;
-  return hasRole(member, ROLE_VERIFIED);
+async function isVerified(member, guildId) {
+  if (!member || !guildId) return false;
+  if ((member.id ?? member.user?.id) === BOT_OWNER_ID) return true;
+  const config = await getServerConfig(guildId);
+  return hasRole(member, config.roleVerified);
 }
 
 // ============================================================================
@@ -564,7 +568,8 @@ client.on('interactionCreate', async (interaction) => {
 async function handleCommand(interaction) {
   const { commandName } = interaction;
   const member = interaction.member;
-  const hasGwModRole = member?.roles.cache.some(role => role.name === ROLE_GIVEAWAY_MANAGERS);
+  const config = await getServerConfig(interaction.guildId);
+  const hasGwModRole = interaction.user.id === BOT_OWNER_ID || member?.roles.cache.some(role => role.name === config.roleGiveawayManagers);
   const isAdmin = member?.permissions.has('Administrator');
 
   if (commandName === 'gw') {
@@ -694,8 +699,9 @@ async function handleXpEdit(interaction) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
   // Check permissions
-  const isManager = member.roles.cache.has(process.env.GIVEAWAY_MANAGER_ROLE_ID);
-  const isAdmin = isAdminOrBot(member);
+  const cfg = await getServerConfig(interaction.guildId);
+  const isManager = interaction.user.id === BOT_OWNER_ID || (cfg.giveawayManagerRoleId ? member.roles.cache.has(cfg.giveawayManagerRoleId) : false);
+  const isAdmin = await isAdminOrBot(member, interaction.guildId);
 
   if (!isManager && !isAdmin) {
     return await interaction.reply({
@@ -751,8 +757,9 @@ async function handleXpView(interaction) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
   // Check permissions
-  const isManager = member.roles.cache.has(process.env.GIVEAWAY_MANAGER_ROLE_ID);
-  const isAdmin = isAdminOrBot(member);
+  const cfg = await getServerConfig(interaction.guildId);
+  const isManager = interaction.user.id === BOT_OWNER_ID || (cfg.giveawayManagerRoleId ? member.roles.cache.has(cfg.giveawayManagerRoleId) : false);
+  const isAdmin = await isAdminOrBot(member, interaction.guildId);
 
   if (!isManager && !isAdmin) {
     return await interaction.reply({
@@ -817,9 +824,9 @@ async function handleMapLink(interaction) {
   const casinoUsername = interaction.options.getString('casino_username');
 
   // Check permissions
-  const isAdmin = isAdminOrBot(member);
-  const isVerif = isVerified(member);
-  
+  const isAdmin = await isAdminOrBot(member, interaction.guildId);
+  const isVerif = await isVerified(member, interaction.guildId);
+
   console.log(`[handleMapLink] User ${interaction.user.username}: isAdmin=${isAdmin}, isVerif=${isVerif}`);
 
   if (!isAdmin && !isVerif) {
@@ -862,8 +869,8 @@ async function handleMapEdit(interaction) {
   const newCasinoUsername = interaction.options.getString('new_casino_username');
 
   // Check permissions
-  const isAdmin = isAdminOrBot(member);
-  const isVerif = isVerified(member);
+  const isAdmin = await isAdminOrBot(member, interaction.guildId);
+  const isVerif = await isVerified(member, interaction.guildId);
 
   if (!isAdmin && !isVerif) {
     return await interaction.reply({
@@ -911,7 +918,7 @@ async function handleMapDelete(interaction) {
   const user = interaction.options.getUser('user');
 
   // Check permissions - only Admin or Giveaway Managers
-  if (!isAdminOrBot(member)) {
+  if (!await isAdminOrBot(member, interaction.guildId)) {
     return await interaction.reply({
       content: '❌ You need Admin or Giveaway Managers role to use this command.',
       flags: 64,
@@ -943,7 +950,7 @@ async function handleMapList(interaction) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
   // Check permissions - only Admin or Giveaway Managers
-  if (!isAdminOrBot(member)) {
+  if (!await isAdminOrBot(member, interaction.guildId)) {
     return await interaction.reply({
       content: '❌ You need Admin or Giveaway Managers role to use this command.',
       flags: 64,
@@ -1007,7 +1014,7 @@ async function handleMapLookup(interaction) {
   const user = interaction.options.getUser('user');
 
   // Check permissions - Verified role or higher
-  if (!isVerified(member) && !isAdminOrBot(member)) {
+  if (!await isVerified(member, interaction.guildId) && !await isAdminOrBot(member, interaction.guildId)) {
     return await interaction.reply({
       content: '❌ You need the Verified role or higher to use this command.',
       flags: 64,
@@ -2445,8 +2452,9 @@ async function handleGiveawayBan(interaction) {
 
   const member = interaction.guild?.members.cache.get(interaction.user.id)
     || await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
-  if (!hasRole(member, ROLE_ADMIN)) {
-    return await interaction.editReply({ content: `❌ Only members with the **${ROLE_ADMIN}** role can ban users from giveaways.` });
+  const banConfig = await getServerConfig(interaction.guildId);
+  if (interaction.user.id !== BOT_OWNER_ID && !hasRole(member, banConfig.roleAdmin)) {
+    return await interaction.editReply({ content: `❌ Only members with the **${banConfig.roleAdmin}** role can ban users from giveaways.` });
   }
 
   const targetUser = interaction.options.getUser('user');
@@ -2499,8 +2507,9 @@ async function handleGiveawayUnban(interaction) {
 
   const member = interaction.guild?.members.cache.get(interaction.user.id)
     || await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
-  if (!hasRole(member, ROLE_ADMIN)) {
-    return await interaction.editReply({ content: `❌ Only members with the **${ROLE_ADMIN}** role can unban users from giveaways.` });
+  const unbanConfig = await getServerConfig(interaction.guildId);
+  if (interaction.user.id !== BOT_OWNER_ID && !hasRole(member, unbanConfig.roleAdmin)) {
+    return await interaction.editReply({ content: `❌ Only members with the **${unbanConfig.roleAdmin}** role can unban users from giveaways.` });
   }
 
   const targetUser = interaction.options.getUser('user');
@@ -2542,7 +2551,7 @@ async function handleGiveawayUnban(interaction) {
 async function handleGiveawayBanlist(interaction) {
   await interaction.deferReply({ flags: 64 });
 
-  if (!isAdminOrBot(interaction.member)) {
+  if (!await isAdminOrBot(interaction.member, interaction.guildId)) {
     return await interaction.editReply({ content: '\u274c You need Admin or Giveaway Managers role.' });
   }
 
@@ -2988,9 +2997,9 @@ async function handleDefaultsSet(interaction) {
 
 async function handleManualCheckByCasino(interaction, casinoName) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
-  
+
   // Check permissions - only Admin or Giveaway Managers
-  if (!isAdminOrBot(member)) {
+  if (!await isAdminOrBot(member, interaction.guildId)) {
     return await interaction.reply({
       content: '❌ You need Admin or Giveaway Managers role to use this command.',
       flags: 64,
@@ -3021,9 +3030,9 @@ async function handleManualCheckByCasino(interaction, casinoName) {
 
 async function handleManualCheckByUser(interaction, user) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
-  
+
   // Check permissions - only Admin or Giveaway Managers
-  if (!isAdminOrBot(member)) {
+  if (!await isAdminOrBot(member, interaction.guildId)) {
     return await interaction.reply({
       content: '❌ You need Admin or Giveaway Managers role to use this command.',
       flags: 64,
@@ -3296,6 +3305,7 @@ async function handleButton(interaction) {
     // Defer immediately to prevent timeout
     await interaction.deferReply({ flags: 64 });
 
+    const entryConfig = await getServerConfig(interaction.guildId);
     const giveaway = await dbGet(
       'SELECT * FROM active_giveaway WHERE guild_id = $1',
       [interaction.guildId]
@@ -3318,7 +3328,7 @@ async function handleButton(interaction) {
       const timeLeft = Number(banRecord.expires_at) - Date.now();
       const remaining = formatTimeRemaining(timeLeft);
       return await interaction.editReply({
-        content: `\u{1F6AB} You have been banned from entering giveaways for **${banRecord.ban_days} day${banRecord.ban_days === 1 ? '' : 's'}**.\n\nYou have **${remaining}** remaining until you can enter again.${SUPPORT_CHANNEL_URL ? `\n\nIf you have questions, please open a ticket: ${SUPPORT_CHANNEL_URL}` : ''}`,
+        content: `\u{1F6AB} You have been banned from entering giveaways for **${banRecord.ban_days} day${banRecord.ban_days === 1 ? '' : 's'}**.\n\nYou have **${remaining}** remaining until you can enter again.${entryConfig.supportChannelUrl ? `\n\nIf you have questions, please open a ticket: ${entryConfig.supportChannelUrl}` : ''}`,
       });
     }
 
