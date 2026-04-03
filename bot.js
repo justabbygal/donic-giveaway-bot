@@ -224,7 +224,7 @@ async function initializeDatabase() {
         guild_id TEXT NOT NULL,
         casino_username TEXT NOT NULL,
         last_xp INTEGER,
-        last_under_donic INTEGER,
+        last_under_code_name INTEGER,
         last_checked_at BIGINT NOT NULL,
         PRIMARY KEY (guild_id, casino_username)
       )
@@ -290,6 +290,16 @@ async function initializeDatabase() {
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='server_settings' AND column_name='platform_code_name') THEN
           ALTER TABLE server_settings ADD COLUMN platform_code_name TEXT;
+        END IF;
+      END$$;
+    `);
+
+    // Migration: rename last_under_donic → last_under_code_name in eligibility_cache
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='eligibility_cache' AND column_name='last_under_donic') THEN
+          ALTER TABLE eligibility_cache RENAME COLUMN last_under_donic TO last_under_code_name;
         END IF;
       END$$;
     `);
@@ -3076,7 +3086,7 @@ async function handleManualCheckByCasino(interaction, casinoName) {
   }
 
   await interaction.reply({
-    content: `✅ **${casinoName}** | XP: ${formatXP(result.xp)} | Under code ${(await getServerConfig(interaction.guildId)).platformCodeName}: ${result.underDonic ? 'Yes' : 'No'}`,
+    content: `✅ **${casinoName}** | XP: ${formatXP(result.xp)} | Under code ${(await getServerConfig(interaction.guildId)).platformCodeName}: ${result.underCodeName ? 'Yes' : 'No'}`,
     flags: 64,
   });
 }
@@ -3121,7 +3131,7 @@ async function handleManualCheckByUser(interaction, user) {
   }
 
   await interaction.reply({
-    content: `✅ <@${user.id}> (**${mapped.casino_username}**) | XP: ${formatXP(result.xp)} | Under code ${(await getServerConfig(interaction.guildId)).platformCodeName}: ${result.underDonic ? 'Yes' : 'No'}`,
+    content: `✅ <@${user.id}> (**${mapped.casino_username}**) | XP: ${formatXP(result.xp)} | Under code ${(await getServerConfig(interaction.guildId)).platformCodeName}: ${result.underCodeName ? 'Yes' : 'No'}`,
     flags: 64,
   });
 }
@@ -4674,14 +4684,14 @@ async function checkEligibility(casinoUsername, minXp, guildId) {
   );
 
   let xp = cached?.last_xp || 0;
-  let underDonic = cached?.last_under_donic === 1;
+  let underCodeName = cached?.last_under_code_name === 1;
 
   if (cached && cached.last_xp >= minXp) {
     return {
-      blocked: !underDonic,
+      blocked: !underCodeName,
       xp,
-      underDonic,
-      reason: !underDonic ? `Not under code ${codeName}` : null,
+      underCodeName,
+      reason: !underCodeName ? `Not under code ${codeName}` : null,
     };
   }
 
@@ -4691,7 +4701,7 @@ async function checkEligibility(casinoUsername, minXp, guildId) {
     return {
       blocked: true,
       xp: 0,
-      underDonic: false,
+      underCodeName: false,
       reason: 'Username not found. Try a different name.',
     };
   }
@@ -4701,36 +4711,36 @@ async function checkEligibility(casinoUsername, minXp, guildId) {
       blocked: false,
       requiresManualCheck: true,
       xp: cached?.last_xp || 0,
-      underDonic: cached?.last_under_donic === 1,
+      underCodeName: cached?.last_under_code_name === 1,
     };
   }
 
   xp = apiResult.xp;
-  underDonic = apiResult.underDonic;
+  underCodeName = apiResult.underDonic;
 
   await dbRun(
     `INSERT INTO eligibility_cache
-     (guild_id, casino_username, last_xp, last_under_donic, last_checked_at)
+     (guild_id, casino_username, last_xp, last_under_code_name, last_checked_at)
      VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (guild_id, casino_username) DO UPDATE SET last_xp = EXCLUDED.last_xp, last_under_donic = EXCLUDED.last_under_donic, last_checked_at = EXCLUDED.last_checked_at`,
-    [guildId, casinoUsername, xp, underDonic ? 1 : 0, Date.now()]
+     ON CONFLICT (guild_id, casino_username) DO UPDATE SET last_xp = EXCLUDED.last_xp, last_under_code_name = EXCLUDED.last_under_code_name, last_checked_at = EXCLUDED.last_checked_at`,
+    [guildId, casinoUsername, xp, underCodeName ? 1 : 0, Date.now()]
   );
 
-  const blocked = xp < minXp || !underDonic;
+  const blocked = xp < minXp || !underCodeName;
   let reason = null;
 
-  if (xp < minXp && !underDonic) {
+  if (xp < minXp && !underCodeName) {
     reason = `Not enough XP (${xp}/${minXp}) and not under code ${codeName}`;
   } else if (xp < minXp) {
     reason = `Not enough XP (${xp}/${minXp})`;
-  } else if (!underDonic) {
+  } else if (!underCodeName) {
     reason = `Not under code ${codeName}`;
   }
 
   return {
     blocked,
     xp,
-    underDonic,
+    underCodeName,
     reason,
   };
 }
