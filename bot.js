@@ -72,6 +72,7 @@ async function getServerConfig(guildId) {
     roleVerified:          settings?.role_verified           || process.env.ROLE_VERIFIED           || 'Verified',
     supportChannelUrl:     settings?.support_channel_url     || process.env.SUPPORT_CHANNEL_URL     || '',
     giveawayManagerRoleId: settings?.giveaway_manager_role_id || process.env.GIVEAWAY_MANAGER_ROLE_ID || '',
+    platformCodeName:      settings?.platform_code_name       || process.env.PLATFORM_CODE_NAME       || 'Donic',
   };
   _configCache.set(guildId, { config, fetchedAt: Date.now() });
   return config;
@@ -144,7 +145,7 @@ const AGE_OF_SETH_MESSAGES = [
 ];
 
 const FROCKKNOCK_MOD_MESSAGES = [
-  'You keep Donic organized like no other mod',
+  'You keep this place organized like no other mod',
   'Solid mod work keeping this place running',
   'You\'re a real pro at moderating',
   'Best mod energy around',
@@ -286,6 +287,9 @@ async function initializeDatabase() {
           ALTER TABLE server_settings ADD COLUMN role_verified TEXT;
           ALTER TABLE server_settings ADD COLUMN support_channel_url TEXT;
           ALTER TABLE server_settings ADD COLUMN giveaway_manager_role_id TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='server_settings' AND column_name='platform_code_name') THEN
+          ALTER TABLE server_settings ADD COLUMN platform_code_name TEXT;
         END IF;
       END$$;
     `);
@@ -707,6 +711,7 @@ async function handleCommand(interaction) {
     }
     if (sub === 'view') return await handleSetupView(interaction);
     if (sub === 'configure') return await handleSetupConfigure(interaction);
+    if (sub === 'eligibility') return await handleSetupEligibility(interaction);
   }
 }
 
@@ -1087,6 +1092,7 @@ async function handleMapLookup(interaction) {
 
 // Function to show giveaway details modal (Step 2) with optional pre-filled values
 async function showGiveawayModal(interaction, customId, previousValues = {}) {
+  const gwModalCfg = await getServerConfig(interaction.guildId);
   const modal = new ModalBuilder()
     .setCustomId(customId)
     .setTitle('Giveaway Details - Step 2');
@@ -1095,7 +1101,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_member')
     .setLabel('Requested by')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('Username requesting this giveaway. Example: Donic')
+    .setPlaceholder(`Username requesting this giveaway. Example: ${gwModalCfg.platformCodeName}`)
     .setRequired(false)
     .setValue(previousValues.member || '');
 
@@ -1119,7 +1125,7 @@ async function showGiveawayModal(interaction, customId, previousValues = {}) {
     .setCustomId('gw_other_req')
     .setLabel('Other Requirements (optional)')
     .setStyle(TextInputStyle.Paragraph)
-    .setPlaceholder('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
+    .setPlaceholder(`Additional rules other than code ${gwModalCfg.platformCodeName} and Min XP (already set). Example: "Tell Lynchy he's #1 mod."`)
     .setRequired(false)
     .setValue(previousValues.otherReq || '');
 
@@ -1538,13 +1544,14 @@ async function handleGiveawayQuickStart(interaction) {
     const discordTimestamp = formatDiscordTimestamp(endTime);
 
     // Build description with hosted by and winner/entry info
+    const templateGwCfg = await getServerConfig(interaction.guildId);
     const descParts = [
-      '═════════════════════════\n⚠️ **MUST BE UNDER CODE *DONIC*** ⚠️\n═════════════════════════',
+      `═════════════════════════\n⚠️ **MUST BE UNDER CODE *${templateGwCfg.platformCodeName.toUpperCase()}*** ⚠️\n═════════════════════════`,
       `Hosted by: <@${interaction.user.id}>\n`,
       `Winners: ${numWinners}`,
       `Entries: 0`
     ];
-    
+
     if (autoCheck) {
       descParts.push(`Ineligible: 0\n─────────────────────────`);
     } else {
@@ -1552,7 +1559,7 @@ async function handleGiveawayQuickStart(interaction) {
     }
 
     embed.setDescription(descParts.join('\n'));
- 
+
 
 embed.addFields(
       { name: 'DETAILS:', value: reqText, inline: false }
@@ -1646,6 +1653,7 @@ embed.addFields(
 
   // Create the modal with interaction ID and default values embedded in customId
   const customId = `gw_start_modal_${interaction.id}_${Buffer.from(defaultSelections.type).toString('base64')}_${defaultSelections.duration}_${defaultSelections.currency}_${defaultSelections.winners}_${defaultSelections.autoCheck}`;
+  const startModalCfg = await getServerConfig(interaction.guildId);
 
   // Show Step 2 modal immediately with empty fields
   const modal = new ModalBuilder()
@@ -1656,7 +1664,7 @@ embed.addFields(
     .setCustomId('gw_member')
     .setLabel('Requested by')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('Username requesting this giveaway. Example: Donic')
+    .setPlaceholder(`Username requesting this giveaway. Example: ${startModalCfg.platformCodeName}`)
     .setRequired(false);
 
   const amountInput = new TextInputBuilder()
@@ -1677,7 +1685,7 @@ embed.addFields(
     .setCustomId('gw_other_req')
     .setLabel('Other Requirements (optional)')
     .setStyle(TextInputStyle.Paragraph)
-    .setPlaceholder('Additional rules other than code Donic and Min XP (already set). Example: "Tell Lynchy he\'s #1 mod."')
+    .setPlaceholder(`Additional rules other than code ${startModalCfg.platformCodeName} and Min XP (already set). Example: "Tell Lynchy he's #1 mod."`)
     .setRequired(false);
 
   modal.addComponents(
@@ -1796,8 +1804,9 @@ async function handleGiveawayEnd(interaction) {
     announcement += winnerText + '\n';
   }
 
-  winnerListText += '\n*(Please comment fresh screenshots of code Donic + XP)*';
-  announcement += '\n*(Please comment fresh screenshots of code Donic + XP)*';
+  const endGwCfg = await getServerConfig(interaction.guildId);
+  winnerListText += `\n*(Please comment fresh screenshots of code ${endGwCfg.platformCodeName} + XP)*`;
+  announcement += `\n*(Please comment fresh screenshots of code ${endGwCfg.platformCodeName} + XP)*`;
 
   // Edit the original message with winners
   try {
@@ -1967,7 +1976,8 @@ async function handleGiveawayReroll(interaction) {
     const casinoUsername = userMap?.casino_username || 'Not linked';
     announcement += `<@${winnerId}> -- Casino: ${casinoUsername}\n`;
   }
-  announcement += '\n*(Please comment fresh screenshots of code Donic + XP)*';
+  const rerollGwCfg = await getServerConfig(interaction.guildId);
+  announcement += `\n*(Please comment fresh screenshots of code ${rerollGwCfg.platformCodeName} + XP)*`;
 
   await message.reply(announcement);
 
@@ -2150,8 +2160,9 @@ async function handleGiveawayRunback(interaction) {
 
       const discordTimestamp = formatDiscordTimestamp(endTime);
 
+      const step2GwCfg = await getServerConfig(interaction.guildId);
       const descParts = [
-        '═════════════════════════\n⚠️ **MUST BE UNDER CODE *DONIC*** ⚠️\n═════════════════════════',
+        `═════════════════════════\n⚠️ **MUST BE UNDER CODE *${step2GwCfg.platformCodeName.toUpperCase()}*** ⚠️\n═════════════════════════`,
         `Hosted by: <@${interaction.user.id}>\n`,
         `Winners: ${step1Data.numWinners}`,
         `Entries: 0`
@@ -3065,7 +3076,7 @@ async function handleManualCheckByCasino(interaction, casinoName) {
   }
 
   await interaction.reply({
-    content: `✅ **${casinoName}** | XP: ${formatXP(result.xp)} | Under donic: ${result.underDonic ? 'Yes' : 'No'}`,
+    content: `✅ **${casinoName}** | XP: ${formatXP(result.xp)} | Under code ${(await getServerConfig(interaction.guildId)).platformCodeName}: ${result.underDonic ? 'Yes' : 'No'}`,
     flags: 64,
   });
 }
@@ -3110,7 +3121,7 @@ async function handleManualCheckByUser(interaction, user) {
   }
 
   await interaction.reply({
-    content: `✅ <@${user.id}> (**${mapped.casino_username}**) | XP: ${formatXP(result.xp)} | Under donic: ${result.underDonic ? 'Yes' : 'No'}`,
+    content: `✅ <@${user.id}> (**${mapped.casino_username}**) | XP: ${formatXP(result.xp)} | Under code ${(await getServerConfig(interaction.guildId)).platformCodeName}: ${result.underDonic ? 'Yes' : 'No'}`,
     flags: 64,
   });
 }
@@ -3415,7 +3426,7 @@ async function handleButton(interaction) {
         .setStyle(ButtonStyle.Primary);
 
       return await interaction.editReply({
-        content: `**Link your Casino**\n\nClick the button below to provide your Casino username.\nThis is a one-time step and won't be required for future giveaways. Once submitted, you'll be entered.\n\n⚠️ MUST BE UNDER CODE DONIC ⚠️`,
+        content: `**Link your Casino**\n\nClick the button below to provide your Casino username.\nThis is a one-time step and won't be required for future giveaways. Once submitted, you'll be entered.\n\n⚠️ MUST BE UNDER CODE ${(await getServerConfig(interaction.guildId)).platformCodeName.toUpperCase()} ⚠️`,
         components: [new ActionRowBuilder().addComponents(linkButton)],
       });
     }
@@ -3436,7 +3447,7 @@ async function handleButton(interaction) {
         await updateGiveawayMessage(interaction.guildId);
 
         return await interaction.editReply({
-          content: `🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code Donic + XP** if you win.`,
+          content: `🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code ${(await getServerConfig(interaction.guildId)).platformCodeName} + XP** if you win.`,
         });
       }
 
@@ -3691,7 +3702,7 @@ async function handleButton(interaction) {
       .setCustomId('template_with_member')
       .setLabel('Member to feature (optional)')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('e.g., "donic"')
+      .setPlaceholder(`e.g., "${(await getServerConfig(interaction.guildId)).platformCodeName.toLowerCase()}"`)
       .setRequired(false);
 
     const requirementsInput = new TextInputBuilder()
@@ -3880,6 +3891,9 @@ async function handleSelectMenu(interaction) {
 async function handleModal(interaction) {
   if (interaction.customId.startsWith('setup_modal')) {
     return await handleSetupModalSubmit(interaction);
+  }
+  if (interaction.customId === 'setup_eligibility_modal') {
+    return await handleSetupEligibilityModalSubmit(interaction);
   }
 
   if (interaction.customId.startsWith('defaults_modal_')) {
@@ -4353,13 +4367,14 @@ async function handleModal(interaction) {
     const discordTimestamp = formatDiscordTimestamp(endTime);
 
     // Build description with hosted by and winner/entry info
+    const noTemplateGwCfg = await getServerConfig(interaction.guildId);
     const descParts = [
-      '═════════════════════════\n⚠️ **MUST BE UNDER CODE *DONIC*** ⚠️\n═════════════════════════',
+      `═════════════════════════\n⚠️ **MUST BE UNDER CODE *${noTemplateGwCfg.platformCodeName.toUpperCase()}*** ⚠️\n═════════════════════════`,
       `Hosted by: <@${interaction.user.id}>\n`,
       `Winners: ${numWinners}`,
       `Entries: 0`
     ];
-    
+
     if (autoCheck) {
       descParts.push(`Ineligible: 0\n─────────────────────────`);
     } else {
@@ -4500,7 +4515,7 @@ embed.addFields(
           await updateGiveawayMessage(guildId);
 
           return await interaction.editReply({
-            content: `✅ Casino name **${casinoUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code Donic + XP** if you win.`,
+            content: `✅ Casino name **${casinoUsername}** has been captured successfully.\n\n🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code ${(await getServerConfig(guildId)).platformCodeName} + XP** if you win.`,
           });
         }
 
@@ -4602,7 +4617,7 @@ client.on('messageCreate', async (message) => {
         await updateGiveawayMessage(message.guildId);
 
         await message.reply({
-          content: `🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code Donic + XP** if you win.`,
+          content: `🍀 Entered - Good luck!\n⚠️ *Eligibility could not be checked automatically*.\nBe prepared with *fresh* screenshots of **code ${(await getServerConfig(message.guildId)).platformCodeName} + XP** if you win.`,
         });
         return;
       }
@@ -4650,6 +4665,9 @@ client.on('messageCreate', async (message) => {
 // ============================================================================
 
 async function checkEligibility(casinoUsername, minXp, guildId) {
+  const eligibilityCfg = await getServerConfig(guildId);
+  const codeName = eligibilityCfg.platformCodeName;
+
   const cached = await dbGet(
     'SELECT * FROM eligibility_cache WHERE guild_id = $1 AND casino_username = $2',
     [guildId, casinoUsername]
@@ -4663,7 +4681,7 @@ async function checkEligibility(casinoUsername, minXp, guildId) {
       blocked: !underDonic,
       xp,
       underDonic,
-      reason: !underDonic ? 'Not under code donic' : null,
+      reason: !underDonic ? `Not under code ${codeName}` : null,
     };
   }
 
@@ -4702,11 +4720,11 @@ async function checkEligibility(casinoUsername, minXp, guildId) {
   let reason = null;
 
   if (xp < minXp && !underDonic) {
-    reason = `Not enough XP (${xp}/${minXp}) and not under code donic`;
+    reason = `Not enough XP (${xp}/${minXp}) and not under code ${codeName}`;
   } else if (xp < minXp) {
     reason = `Not enough XP (${xp}/${minXp})`;
   } else if (!underDonic) {
-    reason = 'Not under code donic';
+    reason = `Not under code ${codeName}`;
   }
 
   return {
@@ -4826,7 +4844,7 @@ function startAutoEndTimer(guildId, endTime) {
             winnerListText += winnerText + '\n';
           }
 
-          winnerListText += '\n*(Please comment fresh screenshots of code Donic + XP)*';
+          winnerListText += `\n*(Please comment fresh screenshots of code ${(await getServerConfig(guildId)).platformCodeName} + XP)*`;
 
           const embed = EmbedBuilder.from(message.embeds[0]);
           
@@ -4959,8 +4977,9 @@ async function updateGiveawayMessage(guildId) {
     const discordTimestamp = formatDiscordTimestamp(endTime);
 
     // Build description with hosted by and winner/entry info
+    const updateGwCfg = await getServerConfig(guildId);
     const descParts = [
-      '═════════════════════════\n⚠️ **MUST BE UNDER CODE *DONIC*** ⚠️\n═════════════════════════',
+      `═════════════════════════\n⚠️ **MUST BE UNDER CODE *${updateGwCfg.platformCodeName.toUpperCase()}*** ⚠️\n═════════════════════════`,
       `Hosted by: <@${giveaway.hosted_by}>\n`,
       `Winners: ${giveaway.num_winners}`,
       `Entries: ${eligible.length}`
@@ -5289,6 +5308,11 @@ function getCommands() {
           name: 'configure',
           description: 'Set role names, manager role ID, and support channel URL',
         },
+        {
+          type: 1,
+          name: 'eligibility',
+          description: 'Set the platform/affiliate code name used in eligibility checks',
+        },
       ],
     },
   ];
@@ -5330,8 +5354,9 @@ async function handleSetupView(interaction) {
     `Verified role: \`${config.roleVerified}\``,
     `Giveaway Manager Role ID: ${config.giveawayManagerRoleId || '_not set_'}`,
     `Support channel URL: ${config.supportChannelUrl || '_not set_'}`,
+    `Platform code name: \`${config.platformCodeName}\``,
     '',
-    '_Run `/setup configure` to change these values._',
+    '_Run `/setup configure` to change roles/channel. Run `/setup eligibility` to change the platform code name._',
   ];
 
   await interaction.reply({ content: lines.join('\n'), flags: 64 });
@@ -5437,6 +5462,54 @@ async function handleSetupModalSubmit(interaction) {
       `Support channel URL: ${supportChannelUrl || '_not set_'}`,
       originalCommand ? `\nYou can now run \`${originalCommand}\` again.` : '',
     ].filter(Boolean).join('\n'),
+  });
+}
+
+// ============================================================================
+// HANDLE: /setup eligibility
+// ============================================================================
+async function handleSetupEligibility(interaction) {
+  const config = await getServerConfig(interaction.guildId);
+
+  const modal = new ModalBuilder()
+    .setCustomId('setup_eligibility_modal')
+    .setTitle('Eligibility Configuration');
+
+  const codeNameInput = new TextInputBuilder()
+    .setCustomId('platform_code_name')
+    .setLabel('Platform/affiliate code name')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('e.g. Donic, MyCode, StreamerName')
+    .setRequired(false)
+    .setValue(config.platformCodeName);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(codeNameInput));
+
+  await interaction.showModal(modal);
+}
+
+// ============================================================================
+// HANDLE: setup_eligibility_modal submission
+// ============================================================================
+async function handleSetupEligibilityModalSubmit(interaction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const platformCodeName = interaction.fields.getTextInputValue('platform_code_name').trim();
+
+  await dbRun(
+    `INSERT INTO server_settings (guild_id, platform_code_name)
+     VALUES ($1, $2)
+     ON CONFLICT (guild_id) DO UPDATE SET platform_code_name = EXCLUDED.platform_code_name`,
+    [interaction.guildId, platformCodeName || null]
+  );
+
+  invalidateServerConfig(interaction.guildId);
+
+  await interaction.editReply({
+    content: [
+      '✅ **Eligibility configuration saved.**',
+      `Platform code name: \`${platformCodeName || '(default: Donic)'}\``,
+    ].join('\n'),
   });
 }
 
