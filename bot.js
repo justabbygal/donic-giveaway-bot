@@ -5229,6 +5229,22 @@ function getCommands() {
         },
       ],
     },
+    {
+      name: 'setup',
+      description: 'Configure the giveaway bot for this server (Admin only)',
+      options: [
+        {
+          type: 1,
+          name: 'view',
+          description: 'View current bot configuration for this server',
+        },
+        {
+          type: 1,
+          name: 'configure',
+          description: 'Set role names, manager role ID, and support channel URL',
+        },
+      ],
+    },
   ];
 }
 
