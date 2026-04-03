@@ -253,6 +253,20 @@ async function initializeDatabase() {
       END$$;
     `);
 
+    // Migration: add per-server config columns to server_settings (v3 → v4)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='server_settings' AND column_name='role_admin') THEN
+          ALTER TABLE server_settings ADD COLUMN role_admin TEXT;
+          ALTER TABLE server_settings ADD COLUMN role_giveaway_managers TEXT;
+          ALTER TABLE server_settings ADD COLUMN role_verified TEXT;
+          ALTER TABLE server_settings ADD COLUMN support_channel_url TEXT;
+          ALTER TABLE server_settings ADD COLUMN giveaway_manager_role_id TEXT;
+        END IF;
+      END$$;
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS templates (
         guild_id TEXT,
