@@ -5405,6 +5405,26 @@ async function handleSetupModalSubmit(interaction) {
 }
 
 // ============================================================================
+// GUILD JOIN — prompt admin to run /setup
+// ============================================================================
+client.on('guildCreate', async (guild) => {
+  try {
+    const channel = guild.channels.cache
+      .filter(c => c.type === 0 && c.permissionsFor(guild.members.me)?.has('SendMessages'))
+      .sort((a, b) => a.position - b.position)
+      .first();
+
+    if (!channel) return;
+
+    await channel.send(
+      `👋 Thanks for adding the Giveaway Bot!\n\nTo finish setup, please run \`/setup configure\` to set your role names and support channel. An admin or Giveaway Manager role is required to use the bot.\n\nRun \`/setup view\` at any time to see the current configuration.`
+    );
+  } catch (err) {
+    console.error(`[guildCreate] Could not send welcome message to ${guild.name}:`, err);
+  }
+});
+
+// ============================================================================
 // LOGIN
 // ============================================================================
 client.login(process.env.DISCORD_TOKEN);
