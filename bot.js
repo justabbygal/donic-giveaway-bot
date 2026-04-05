@@ -5055,7 +5055,8 @@ async function selectWinners(entrants, count, guildId) {
   const availableEntrants = [...validEntrants];
 
   // Pure random selection - no weighting
-  for (let i = 0; i < Math.min(count, availableEntrants.length); i++) {
+  const numToPick = Math.min(count, availableEntrants.length);
+  for (let i = 0; i < numToPick; i++) {
     const randomIndex = Math.floor(Math.random() * availableEntrants.length);
     const winner = availableEntrants[randomIndex];
     winners.push(winner);
