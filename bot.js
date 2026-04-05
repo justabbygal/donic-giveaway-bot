@@ -1929,6 +1929,7 @@ async function handleGiveawayCancel(interaction) {
 }
 
 async function handleGiveawayReroll(interaction) {
+  let fromActive = true;
   let giveaway = await dbGet(
     'SELECT * FROM active_giveaway WHERE guild_id = $1',
     [interaction.guildId]
@@ -1936,6 +1937,7 @@ async function handleGiveawayReroll(interaction) {
 
   // If no active giveaway, check history (most recent one)
   if (!giveaway) {
+    fromActive = false;
     giveaway = await dbGet(
       'SELECT * FROM giveaway_history WHERE guild_id = $1 ORDER BY id DESC LIMIT 1',
       [interaction.guildId]
@@ -1974,6 +1976,15 @@ async function handleGiveawayReroll(interaction) {
   const numToReroll = Math.min(howMany, availableForReroll.length);
 
   const winnerIds = await selectWinners(availableForReroll, numToReroll, interaction.guildId);
+
+  // Persist reroll winners into initial_winners so future rerolls don't re-select them
+  const updatedInitialWinners = [...new Set([...initialWinners, ...winnerIds])];
+  if (fromActive) {
+    await dbRun('UPDATE active_giveaway SET initial_winners = $1 WHERE guild_id = $2', [JSON.stringify(updatedInitialWinners), interaction.guildId]);
+  } else {
+    await dbRun('UPDATE giveaway_history SET initial_winners = $1 WHERE id = $2', [JSON.stringify(updatedInitialWinners), giveaway.id]);
+  }
+
   const channel = await client.channels.fetch(giveaway.channel_id);
   const message = await channel.messages.fetch(giveaway.message_id);
 
@@ -3449,10 +3460,9 @@ async function handleButton(interaction) {
       );
 
       if (result.requiresManualCheck) {
-        eligible.push(interaction.user.id);
         await dbRun(
-          'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
-          [JSON.stringify(eligible), interaction.guildId]
+          `UPDATE active_giveaway SET eligible_entrants = (eligible_entrants::jsonb || jsonb_build_array($1::text))::text WHERE guild_id = $2 AND NOT eligible_entrants::jsonb @> jsonb_build_array($1::text)`,
+          [interaction.user.id, interaction.guildId]
         );
         await updateGiveawayMessage(interaction.guildId);
 
@@ -3462,10 +3472,9 @@ async function handleButton(interaction) {
       }
 
       if (result.blocked) {
-        ineligible.push(interaction.user.id);
         await dbRun(
-          'UPDATE active_giveaway SET ineligible_entrants = $1 WHERE guild_id = $2',
-          [JSON.stringify(ineligible), interaction.guildId]
+          `UPDATE active_giveaway SET ineligible_entrants = (ineligible_entrants::jsonb || jsonb_build_array($1::text))::text WHERE guild_id = $2 AND NOT ineligible_entrants::jsonb @> jsonb_build_array($1::text)`,
+          [interaction.user.id, interaction.guildId]
         );
         await updateGiveawayMessage(interaction.guildId);
 
@@ -3475,10 +3484,9 @@ async function handleButton(interaction) {
       }
     }
 
-    eligible.push(interaction.user.id);
     await dbRun(
-      'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
-      [JSON.stringify(eligible), interaction.guildId]
+      `UPDATE active_giveaway SET eligible_entrants = (eligible_entrants::jsonb || jsonb_build_array($1::text))::text WHERE guild_id = $2 AND NOT eligible_entrants::jsonb @> jsonb_build_array($1::text)`,
+      [interaction.user.id, interaction.guildId]
     );
 
     await updateGiveawayMessage(interaction.guildId);
@@ -3550,10 +3558,13 @@ async function handleButton(interaction) {
       [guildId, giveaway.started_at, userId, Date.now()]
     );
 
-    // Update database
+    // Update database — remove user from both lists atomically
     await dbRun(
-      'UPDATE active_giveaway SET eligible_entrants = $1, ineligible_entrants = $2 WHERE guild_id = $3',
-      [JSON.stringify(eligible), JSON.stringify(ineligible), guildId]
+      `UPDATE active_giveaway SET
+        eligible_entrants   = (SELECT COALESCE(jsonb_agg(e), '[]'::jsonb)::text FROM jsonb_array_elements_text(eligible_entrants::jsonb) e WHERE e != $1),
+        ineligible_entrants = (SELECT COALESCE(jsonb_agg(e), '[]'::jsonb)::text FROM jsonb_array_elements_text(ineligible_entrants::jsonb) e WHERE e != $1)
+       WHERE guild_id = $2`,
+      [userId, guildId]
     );
 
     // Update the giveaway message
@@ -4517,10 +4528,9 @@ embed.addFields(
         const result = await checkEligibility(casinoUsername, giveaway.min_xp, guildId);
 
         if (result.requiresManualCheck) {
-          eligible.push(interaction.user.id);
           await dbRun(
-            'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
-            [JSON.stringify(eligible), guildId]
+            `UPDATE active_giveaway SET eligible_entrants = (eligible_entrants::jsonb || jsonb_build_array($1::text))::text WHERE guild_id = $2 AND NOT eligible_entrants::jsonb @> jsonb_build_array($1::text)`,
+            [interaction.user.id, guildId]
           );
           await updateGiveawayMessage(guildId);
 
@@ -4530,10 +4540,9 @@ embed.addFields(
         }
 
         if (result.blocked) {
-          ineligible.push(interaction.user.id);
           await dbRun(
-            'UPDATE active_giveaway SET ineligible_entrants = $1 WHERE guild_id = $2',
-            [JSON.stringify(ineligible), guildId]
+            `UPDATE active_giveaway SET ineligible_entrants = (ineligible_entrants::jsonb || jsonb_build_array($1::text))::text WHERE guild_id = $2 AND NOT ineligible_entrants::jsonb @> jsonb_build_array($1::text)`,
+            [interaction.user.id, guildId]
           );
           await updateGiveawayMessage(guildId);
 
@@ -4544,10 +4553,9 @@ embed.addFields(
       }
 
       // Add to eligible entrants
-      eligible.push(interaction.user.id);
       await dbRun(
-        'UPDATE active_giveaway SET eligible_entrants = $1 WHERE guild_id = $2',
-        [JSON.stringify(eligible), guildId]
+        `UPDATE active_giveaway SET eligible_entrants = (eligible_entrants::jsonb || jsonb_build_array($1::text))::text WHERE guild_id = $2 AND NOT eligible_entrants::jsonb @> jsonb_build_array($1::text)`,
+        [interaction.user.id, guildId]
       );
 
       await updateGiveawayMessage(guildId);
